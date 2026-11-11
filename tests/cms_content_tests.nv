@@ -1,0 +1,311 @@
+// cms_content_tests.nv — ContentInfo, data, digested-data and
+// encrypted-data, and the symmetric primitives under them.
+//
+// RFC 4134 prints its examples as ASN.1 dumps with the octet strings in
+// hexadecimal, not as bytes.  Sections 3.1, 3.2, 6 and 7.1 are small enough
+// to be written out byte for byte from the dump, with the lengths the dump
+// states, and are checked against it here.  The OpenSSL vectors below were
+// made once with OpenSSL 3.0.13 (tests/generate/gen_cms_vectors.sh has the
+// commands) and are checked in as hex.
+
+use std.test
+use std.bytes
+use std.list
+use cmserr
+use cmsoid
+use cmsder
+use cmscrypto
+use cmsinfo
+
+fn said<T>(r: Result<T, CmsError>) -> Str
+    match r
+        Ok(_)  => "ok"
+        Err(e) => e.message()
+
+fn h(s: Str) -> Bytes
+    bytes.from_hex(s) ?? bytes.zeros(0)
+
+fn hex(b: Bytes) -> Str
+    bytes.to_hex(b)
+
+fn text_of(r: Result<Bytes, CmsError>) -> Str
+    match r
+        Ok(b)  => bytes.to_str(b)
+        Err(e) => e.message()
+
+fn sample() -> Bytes
+    bytes.from_str("This is some sample content.")
+
+// RFC 4134 section 3.1: a Data ContentInfo in BER, indefinite lengths and a
+// constructed OCTET STRING of two chunks.
+fn rfc4134_3_1() -> Str
+    "3080" + "06092a864886f70d010701" + "a080" + "2480" + "040454686973" + "041820697320736f6d652073616d706c6520636f6e74656e742e" + "0000" + "0000" + "0000"
+
+// RFC 4134 section 3.2: the same in DER, 43 octets.
+fn rfc4134_3_2() -> Str
+    "302b" + "06092a864886f70d010701" + "a01e" + "041c" + hex(sample())
+
+// RFC 4134 section 6: a DigestedData of the sample with SHA-1, 94 octets.
+fn rfc4134_6() -> Str
+    "305e" + "06092a864886f70d010705" + "a051" + "304f" + "020100" + "300706052b0e03021a" + "302b06092a864886f70d010701a01e041c" + hex(sample()) + "0414406aec085279ba6e16022d9e0629c0229687dd48"
+
+// RFC 4134 section 7.1: an EncryptedData with DES-EDE3-CBC, 89 octets.
+fn rfc4134_7_1() -> Str
+    "3057" + "06092a864886f70d010706" + "a04a" + "3048" + "020100" + "3043" + "06092a864886f70d010701" + "3014" + "06082a864886f70d0307" + "0408b36b6bfb6231084e" + "8020" + "fafceddb3f18171d3889" + "11ea34d620dbf4c3d95815ef933b9af5d704f6b570e2"
+
+fn secret256() -> Bytes
+    h("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+
+fn rsa_pkcs1() -> Str
+    "308205ae06092a864886f70d010702a082059f3082059b020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082031b30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd30429318202423082023e0201013032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353831305a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300d06092a864886f70d010101050004820100b7a9d076a59d34642aa7a775a9e01f138af3c8c30b863b0c71d9928d52b124c618169d478bacf7e8efcfe3014c3416c2a5396e21a48e2ffc345e6e188b819fab2acb212f1dd69d45ce767a2c19484bcf6f85467e0ee8e2c36fba1541cce15f74af22b6fd2d355c7f3218e690836e748ea78fef5b003b949af2097225dc2b389a98cbeadc8a64eaa815fbf47ef682950c03d4631c2b5fe3f781ea9fb018e6fc6e3c863531f21fb1a991d2d438a228cc914ccc319f3b92578f025a495e547a5d507dcc948ea4163928928d5cf4fdaf9fcd801c79b37e97cd370cee12bedaf15174e737dd3529329b5f8409aa065a68178bbe7204c245a334bb4ca1f32512c483e8"
+
+fn rsa_pss() -> Str
+    "308205e206092a864886f70d010702a08205d3308205cf020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082031b30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd3042931820276308202720201013032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353832355a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a20302012004820100bf684695cc139a3577a7977f4d02fa9e10d55d6b809075d81a42aae6bc545eed149249e691c837008b847135d31b7538d0496e4aa75ba0e47d7cdc68e40bb3061bc3f8ff2afcd40c74e6839954e957928c913bbb214256dc0502a84ee586151a0b576443fd5d45040e8fd42f282add702eaa15eee35adf4eed94e70ddf99eeca3224f7a261ec4b697d0dd83aad12f7e4564de27f2c054f42481cb86f53249e139920e5d1efed639d19d99b1af3d49bd2b01f56ca213d8a3e4f4002884f9bf01f88383ebe1b34bc1286e371b3988ffed5503c4d212a186bd8cee4b62d0c651e9a2b401ffc9a4a38340c1e33f7dd427fbbdfaf19a35de75057391905fad8b9eca8"
+
+fn ec() -> Str
+    "3082036206092a864886f70d010702a08203533082034f020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082018d308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e553182018430820180020101303130193117301506035504030c0e636d732d6e76206563207465737402146a35613cf1100f844a551d5858091de8125c8106300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353831305a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300a06082a8648ce3d04030204483046022100883d42c8698b1cd56ec19491c424818a4a58f5a087067573282f06e4622751e3022100afef0eea1792239503e5bc792cd10e2bdeae5cdd32ba2b222ffc9a6034959013"
+
+fn ec_detached() -> Str
+    "3082034a06092a864886f70d010702a082033b30820337020101310d300b0609608648016503040201300b06092a864886f70d010701a082018d308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e55318201833082017f020101303130193117301506035504030c0e636d732d6e76206563207465737402146a35613cf1100f844a551d5858091de8125c8106300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313039303431325a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300a06082a8648ce3d04030204473045022100d78f5b10f655e05b9ca037e94435e9ba20f2802702b3b47679a988f4e1927aa6022037634aa76e0c14d849bf6327a6d7f7927ff0f638ec2965cf3223d952f394bafb"
+
+fn certs_only() -> Str
+    "308204d306092a864886f70d010702a08204c4308204c00201013100300b06092a864886f70d010701a08204a8308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e5530820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd304293100"
+
+fn kek128() -> Str
+    "308201ea06092a864886f70d010703a08201db308201d7020102318201823082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d0101010500048201000e8884c933280d7d7673ffbcd44a7ac6d6df551c2490dbfa0d194eb5b3d017d2d9c902cf3e0652e12a319343a51dff78ce93f70981e840f4d10dd23f901ffa3299c9c441cf2c21f858343bf0540caeceb659d2808b21ec20e7ba10ac27615c79b08f5e69261244da3b875ddc8e2cbd960e376c63944160e0926130664be76d268ea2ae4a1055eba2fa02c522e4bbb4a8aa29a49a8b19ff9c97b048c74eed4b92b52ccfcbbb465ea71375db8fa9eb490d044f78593337aaed3faedf63a58768731cbf9ba9d17bf947db3949080e0917e90c95604de9a4fd04d23a6602979b20e5ef6cca77b46a39b25407bb3cfb06c271c189b2e1e4cae435bc0dfc07ca7d6543a232020104300604044b4b4b4b300b06096086480165030401050418192b4eecc432bb10fccc128dd9ccfb5a3a102618f17a45a6304c06092a864886f70d010701301d06096086480165030401020410a1ad38d33f0bb44bbc3ffbf69450ed4e8020ea095016f29bce2e125f2cb50623a0e0724d722412faa909428982f4295055a0"
+
+fn pwri() -> Str
+    "3082022806092a864886f70d010703a082021930820215020103318201c03082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d010101050004820100c3ac4fd52c7b8c91c5bb2036976ef0b88ecdc69f9c07f48e1e7809163010df6e62e20d055454ff93dd245f39830e92d381e6e55c2944b1882b8f7840aafd0a9fe612065fb944792aa3e964a4b567ed06ad1275f004deb4e7e1a5e1874a83d3e1721abcad87ae86221d783b855605efbcc5bfc94b5dfc8b343075edfdc9f7849869d8244eccf043a8bd27bfcfa696a4c48bccc328836796c8a48e0d697af220c6c637d399c68d5e9e5b201ec43aa8fb35ca8c9de532c267a048134a668872e4b0e3a8d139172c730f287b1876bedfa6a9f60f6fe79ca6c4be4b892b4f87abed9c8926856df6c2d1c4197d3391b06c39abce0cf4c909ea0e8e056ad01e41882b99a370020100a01b06092a864886f70d01050c300e04085f4c34785761693402020800302c060b2a864886f70d0109100309301d060960864801650304010204105184a37877eed9e274d757c0aba555de04203cbc6712dbf4ade38f6ae290c8e042fcf8c1504538f775cdfd2e734bd88df998304c06092a864886f70d010701301d06096086480165030401020410523e2d6850508496f53455a59adf62d48020528129727f071029e6f1d8127b9f9294561b7211ab5001b7baccb99d1890997d"
+
+fn authenv() -> Str
+    "308201f0060b2a864886f70d0109100117a08201df308201db020100318201803082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010105000482010072dd056e3659166f6a71e2fa2f410378a418029c642752aac62631d11012cee840e79d4a9122b2a7df4f928f3d78a18c663f93b5c670f995c9b11fac695da08f8d506dbaef3df158172c75b95c996bb6587523ae84537c436d1be78b8a50bc2549d6f2831a9c899b719cd58739a956dacfc25a0ad7c592c81ce3d5d5a8604b4ea91b85ebc719f0809ec0e0342fd388988fc43d61f31f6c96b62202c393bcc51a2b69539625191a578dfe843695e8f4b135513dcdd3c1340ebcb22a2e8f0b7c868659ebf4d4bf5c019bd39e1574d7bd1b74a9c09258c73df527949fad52414fece2bdc1d598f467b07909fed06fd52796fcda9598bbc2cc83506296a9c14333aca230020104300404024b4b300b0609608648016503040105041816cb4c8f556ce18b3f8e89847ca4a0f33a442c304266cae8304006092a864886f70d010701301e06096086480165030401063011040cb4748767cae94761b9fd2bd502011080138bce45da359a360442d0d40ea2e00dca0202bc0410e7bcd4555ee371df01259100eab805e8"
+
+fn encdata() -> Str
+    "306006092a864886f70d010706a0533051020100304c06092a864886f70d010701301d060960864801650304012a041088a5713cdbdb2b15afa25b35a2101aaf8020f8ae00f2c2e07aec983ebb7da869756ae7072ca56d0577bfca1ddf6f12b5cac0"
+
+fn digested() -> Str
+    "306506092a864886f70d010705a0583056020100300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0a04206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b"
+
+fn cert_rsa() -> Str
+    "30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd30429"
+
+fn cert_ec() -> Str
+    "308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e55"
+
+@test
+fn test_rfc4134_3_data_in_ber_and_der() [io]
+    test.assert_eq_str(text_of(cmsinfo.data_read(h(rfc4134_3_1()))), "This is some sample content.")
+    test.assert_eq_str(text_of(cmsinfo.data_read(h(rfc4134_3_2()))), "This is some sample content.")
+    test.case("writing the sample gives the DER of 3.2, 43 octets")
+    match cmsinfo.data_write(sample())
+        Ok(b)  =>
+            test.assert_eq_str(hex(b), rfc4134_3_2())
+            test.assert_eq(bytes.len(b), 45)
+        Err(e) => test.fail(e.message())
+    test.case("a ContentInfo is read whole: the type and the content")
+    match cmsinfo.read(h(rfc4134_3_1()))
+        Err(e) => test.fail(e.message())
+        Ok(info) =>
+            test.assert_eq_str(info.content_type, OID_DATA)
+            test.assert_eq(info.content == None, false)
+
+@test
+fn test_rfc4134_6_digested_data() [io]
+    match cmsinfo.digested_read(h(rfc4134_6()))
+        Err(e) => test.fail(e.message())
+        Ok(d)  =>
+            test.assert_eq_str(d.digest_alg, OID_SHA1)
+            test.assert_eq_str(d.content_type, OID_DATA)
+            test.assert_eq_str(hex(d.digest), "406aec085279ba6e16022d9e0629c0229687dd48")
+            test.assert_eq_str(text_of(cmsinfo.digested_verify(d, None)), "This is some sample content.")
+            test.case("content supplied as well as carried")
+            test.assert_eq_str(said(cmsinfo.digested_verify(d, Some(sample()))),
+                "cms: content was supplied for a message that carries its own")
+            test.case("a changed digest")
+            let bad = CmsDigested { digest_alg: d.digest_alg, content_type: d.content_type, content: d.content,
+                                    digest: h("406aec085279ba6e16022d9e0629c0229687dd49") }
+            test.assert_eq_str(said(cmsinfo.digested_verify(bad, None)), "cms: the signature, digest or tag did not verify")
+    test.case("writing the sample with SHA-1 gives the RFC's 96 octets")
+    match cmsinfo.digested_write(OID_SHA1, sample(), false)
+        Ok(b)  => test.assert_eq_str(hex(b), rfc4134_6())
+        Err(e) => test.fail(e.message())
+
+@test
+fn test_digested_data_detached_and_openssl() [io]
+    match cmsinfo.digested_write(OID_SHA256, bytes.from_str("detach me"), true)
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            match cmsinfo.digested_read(b)
+                Err(e) => test.fail(e.message())
+                Ok(d)  =>
+                    test.assert_eq(d.content == None, true)
+                    test.assert_eq_str(said(cmsinfo.digested_verify(d, None)), "cms: the message has detached content and none was supplied")
+                    test.assert_eq_str(text_of(cmsinfo.digested_verify(d, Some(bytes.from_str("detach me")))), "detach me")
+                    test.assert_eq_str(said(cmsinfo.digested_verify(d, Some(bytes.from_str("detach you")))),
+                        "cms: the signature, digest or tag did not verify")
+    test.case("OpenSSL: cms -digest_create -md sha256")
+    match cmsinfo.digested_read(h(digested()))
+        Err(e) => test.fail(e.message())
+        Ok(d)  =>
+            test.assert_eq_str(d.digest_alg, OID_SHA256)
+            test.assert_eq_str(text_of(cmsinfo.digested_verify(d, None)), "Hello, CMS world.\r\n")
+    match cmsinfo.digested_write(OID_SHA256, bytes.from_str("Hello, CMS world.\r\n"), false)
+        Ok(b)  => test.assert_eq_str(hex(b), digested())
+        Err(e) => test.fail(e.message())
+    test.assert_eq_str(said(cmsinfo.digested_write("1.2.3", sample(), false)), "cms: algorithm 1.2.3 is not implemented")
+
+@test
+fn test_encrypted_data() [io]
+    test.case("RFC 4134 7.1 is TripleDES, which the registry cannot run: the structure is refused by name")
+    test.assert_eq_str(said(cmsinfo.encrypted_read(h(rfc4134_7_1()))),
+        "cms: not implemented: DES-EDE3-CBC content encryption: the registry has no 3DES")
+    test.case("OpenSSL: cms -EncryptedData_encrypt -aes-256-cbc")
+    match cmsinfo.encrypted_read(h(encdata()))
+        Err(e) => test.fail(e.message())
+        Ok(e)  =>
+            test.assert_eq(e.version, 0)
+            test.assert_eq_str(e.eci.enc_alg, OID_AES256_CBC)
+            test.assert_eq(bytes.len(e.eci.iv), 16)
+            test.assert_eq_str(text_of(cmsinfo.encrypted_decrypt(e, secret256(), None)), "Hello, CMS world.\r\n")
+            test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, h("00"), None)),
+                "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.42 is 32 bytes")
+            test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, secret256(), Some(sample()))),
+                "cms: content was supplied for a message that carries its own")
+            test.case("writing it again with the same key and IV gives OpenSSL's bytes")
+            match cmsinfo.encrypted_write(OID_AES256_CBC, secret256(), e.eci.iv, bytes.from_str("Hello, CMS world.\r\n"), false)
+                Ok(b)  => test.assert_eq_str(hex(b), encdata())
+                Err(m) => test.fail(m.message())
+            test.case("a wrong key gives bad padding or garbage, and padding is the only check CBC has")
+            test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, h("ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), None)),
+                "cms: the signature, digest or tag did not verify")
+    test.case("detached ciphertext")
+    match cmsinfo.encrypted_write(OID_AES128_CBC, h("000102030405060708090a0b0c0d0e0f"), h("0f0e0d0c0b0a09080706050403020100"), sample(), true)
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            match cmsinfo.encrypted_read(b)
+                Err(e) => test.fail(e.message())
+                Ok(e)  =>
+                    test.assert_eq(e.eci.encrypted == None, true)
+                    test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, h("000102030405060708090a0b0c0d0e0f"), None)),
+                        "cms: the message has detached content and none was supplied")
+    test.assert_eq_str(said(cmsinfo.encrypted_write("1.2.3", h("00"), h("00"), sample(), false)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsinfo.encrypted_write(OID_AES128_GCM, h("00"), h("00"), sample(), false)), "cms: algorithm 2.16.840.1.101.3.4.1.6 is not implemented")
+    test.assert_eq_str(said(cmsinfo.encrypted_write(OID_AES128_CBC, h("00"), h("00"), sample(), false)),
+        "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.2 is 16 bytes")
+
+@test
+fn test_content_info_refusals() [io]
+    test.assert_eq_str(said(cmsinfo.data_read(h(digested()))), "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.1 was expected")
+    test.assert_eq_str(said(cmsinfo.data_read(h("0500"))), "cms: malformed structure: a ContentInfo is not the expected type")
+    test.assert_eq_str(said(cmsinfo.data_read(h("3000"))), "cms: malformed structure: the content type is missing")
+    test.assert_eq_str(said(cmsinfo.data_read(h("30030401aa"))), "cms: malformed structure: an OBJECT IDENTIFIER")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300b06092a864886f70d010701"))), "cms: the message has detached content and none was supplied")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "0500"))), "cms: malformed structure: the content is under [0]")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "a000"))), "cms: malformed structure: the content is missing")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300f06092a864886f70d010701" + "a0020500"))), "cms: malformed structure: the data is not the expected type")
+    test.assert_eq_str(said(cmsinfo.data_read(h(rfc4134_3_2() + "00"))), "cms: malformed structure: bytes follow the value")
+    test.assert_eq_str(said(cmsinfo.data_read(h("30"))), "cms: malformed structure: asn1: the input ends at byte 1 with 1 more byte(s) needed")
+    test.assert_eq_str(said(cmsinfo.digested_read(h(rfc4134_3_2()))), "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.5 was expected")
+
+@test
+fn test_digests_and_cbc_primitives() [io]
+    test.assert_eq(cmscrypto.digest_len(OID_SHA1), 20)
+    test.assert_eq(cmscrypto.digest_len(OID_SHA256), 32)
+    test.assert_eq(cmscrypto.digest_len(OID_SHA384), 48)
+    test.assert_eq(cmscrypto.digest_len(OID_SHA512), 64)
+    test.assert_eq(cmscrypto.digest_len("1.2.3"), 0)
+    match cmscrypto.digest_of(OID_SHA384, bytes.from_str("abc"))
+        Ok(d)  => test.assert_eq(bytes.len(d), 48)
+        Err(e) => test.fail(e.message())
+    match cmscrypto.digest_of(OID_SHA512, bytes.from_str("abc"))
+        Ok(d)  => test.assert_eq(bytes.len(d), 64)
+        Err(e) => test.fail(e.message())
+    test.assert_eq_str(said(cmscrypto.digest_of("1.2.3", h(""))), "cms: algorithm 1.2.3 is not implemented")
+    test.case("padding of every length, and the refusals")
+    for n in 0..34
+        match cmscrypto.cbc_encrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("000102030405060708090a0b0c0d0e0f"), bytes.zeros(n))
+            Err(e) => test.fail(e.message())
+            Ok(ct) =>
+                test.assert_eq(bytes.len(ct), (n / 16 + 1) * 16)
+                match cmscrypto.cbc_decrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("000102030405060708090a0b0c0d0e0f"), ct)
+                    Ok(p)  => test.assert_eq(bytes.len(p), n)
+                    Err(e) => test.fail(e.message())
+    test.assert_eq(cmscrypto.unpad(bytes.zeros(0)) == None, true)
+    test.assert_eq(cmscrypto.unpad(bytes.zeros(16)) == None, true)
+    test.assert_eq(cmscrypto.unpad(bytes.fill(bytes.zeros(16), 0, 16, 17)) == None, true)
+    test.assert_eq(cmscrypto.unpad(h("00000000000000000000000000000203")) == None, true)
+    test.assert_eq_str(said(cmscrypto.cbc_decrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("00"), bytes.zeros(16))),
+        "cms: unusable key: CBC takes a 16-byte IV and whole blocks")
+    test.assert_eq_str(said(cmscrypto.cbc_encrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("00"), bytes.zeros(16))),
+        "cms: unusable key: CBC takes a 16-byte IV and whole blocks")
+    test.assert_eq_str(said(cmscrypto.cbc_decrypt(h("00"), h("000102030405060708090a0b0c0d0e0f"), bytes.zeros(16))),
+        "cms: unusable key: an AES key is 16, 24 or 32 bytes")
+    test.assert_eq_str(said(cmscrypto.cbc_decrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("000102030405060708090a0b0c0d0e0f"), bytes.zeros(0))),
+        "cms: the signature, digest or tag did not verify")
+
+@test
+fn test_rfc3394_key_wrap_vectors() [io]
+    let k128 = h("000102030405060708090a0b0c0d0e0f")
+    let k256 = h("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+    let d128 = h("00112233445566778899aabbccddeeff")
+    let d256 = h("00112233445566778899aabbccddeeff000102030405060708090a0b0c0d0e0f")
+    match cmscrypto.kw_wrap(k128, d128)
+        Ok(w)  =>
+            test.assert_eq_str(hex(w), "1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5")
+        Err(e) => test.fail(e.message())
+    match cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5"))
+        Ok(p)  => test.assert_eq_str(hex(p), hex(d128))
+        Err(e) => test.fail(e.message())
+    match cmscrypto.kw_wrap(k256, d256)
+        Ok(w)  => test.assert_eq_str(hex(w), "28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21")
+        Err(e) => test.fail(e.message())
+    match cmscrypto.kw_unwrap(k256, h("28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21"))
+        Ok(p)  => test.assert_eq_str(hex(p), hex(d256))
+        Err(e) => test.fail(e.message())
+    test.assert_eq_str(said(cmscrypto.kw_wrap(k128, h("0011223344556677"))), "cms: unusable key: the key to wrap is a multiple of 8 bytes and at least 16")
+    test.assert_eq_str(said(cmscrypto.kw_wrap(h("00"), d128)), "cms: unusable key: an AES key is 16, 24 or 32 bytes")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(h("00"), h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5"))), "cms: unusable key: an AES key is 16, 24 or 32 bytes")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447"))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe4"))), "cms: the signature, digest or tag did not verify")
+
+@test
+fn test_rfc3211_key_wrap_round_trips() [io]
+    let kek = h("000102030405060708090a0b0c0d0e0f")
+    let iv = h("0f0e0d0c0b0a09080706050403020100")
+    test.assert_eq(cmscrypto.pwri_pad_len(16), 12)
+    test.assert_eq(cmscrypto.pwri_pad_len(28), 0)
+    test.assert_eq(cmscrypto.pwri_pad_len(29), 15)
+    test.assert_eq(cmscrypto.pwri_pad_len(32), 12)
+    for n in [4, 16, 24, 28, 29, 32, 64]
+        var cek = bytes.zeros(n)
+        for i in 0..n
+            bytes.set_u8(cek, i, i * 5 + 1)
+        match cmscrypto.pwri_wrap(kek, iv, cek, bytes.zeros(32))
+            Err(e) => test.fail(e.message())
+            Ok(w)  =>
+                test.assert_eq(bytes.len(w) % 16, 0)
+                test.assert_eq(bytes.len(w) >= 32, true)
+                match cmscrypto.pwri_unwrap(kek, iv, w)
+                    Ok(p)  => test.assert_eq_str(hex(p), hex(cek))
+                    Err(e) => test.fail(e.message())
+                test.assert_eq_str(said(cmscrypto.pwri_unwrap(h("0f0e0d0c0b0a09080706050403020100"), iv, w)), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, h("00"), bytes.zeros(16))), "cms: unusable key: the key to wrap is 4 to 255 bytes")
+    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, bytes.zeros(16), h("00"))), "cms: unusable key: the padding is 12 bytes")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(16))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(33))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(32))), "cms: the signature, digest or tag did not verify")
+
+@test
+fn test_gcm_seal_and_open() [io]
+    let key = h("000102030405060708090a0b0c0d0e0f")
+    let nonce = h("000102030405060708090a0b")
+    match cmscrypto.gcm_seal(key, nonce, h("aa"), sample())
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            test.assert_eq(bytes.len(s.tag), 16)
+            test.assert_eq_str(text_of(cmscrypto.gcm_open(key, nonce, h("aa"), s.ciphertext, s.tag)), "This is some sample content.")
+            test.assert_eq_str(said(cmscrypto.gcm_open(key, nonce, h("ab"), s.ciphertext, s.tag)), "cms: the signature, digest or tag did not verify")
+            test.assert_eq_str(said(cmscrypto.gcm_open(key, nonce, h("aa"), s.ciphertext, h("00"))),
+                "cms: not implemented: an AES-GCM tag of 1 bytes, only 16 is implemented")
+    test.assert_eq_str(said(cmscrypto.gcm_seal(key, h(""), h(""), h(""))), "cms: unusable key: the nonce is not empty")
+    test.assert_eq_str(said(cmscrypto.gcm_seal(h("00"), nonce, h(""), h(""))), "cms: unusable key: an AES key is 16, 24 or 32 bytes")

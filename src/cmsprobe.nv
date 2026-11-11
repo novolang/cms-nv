@@ -1,0 +1,8 @@
+use std.bytes
+use asn1read
+use x509cert
+
+pub fn probe(b: Bytes) -> Int
+    match x509cert.parse(b, asn1read.default_limits())
+        Ok(c) => 1
+        Err(_) => 0

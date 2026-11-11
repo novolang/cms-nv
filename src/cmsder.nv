@@ -1,0 +1,290 @@
+// cmsder.nv — the DER and BER this package reads and writes, over asn1-nv.
+//
+// Reading.  A value is a `DerNode`: the caller's bytes, where the value
+// starts and how long it is, its class, tag number and construction, and
+// where its content starts.  Nothing is copied until `content`, `raw` or
+// `octets` is called.  The limits are asn1-nv's BER limits: a message is
+// often written by a streaming encoder that uses the indefinite length,
+// and a constructed OCTET STRING.  The structures a signature covers are
+// checked to be definite-length where they are used.
+//
+// Writing.  A structure is assembled from members that are already
+// encoded, so the writer is a concatenation: `tlv` writes one value, and
+// `seq`, `set_of`, `oct`, `int_u`, `oid`, `ctx` and `utc_time` write the
+// shapes CMS uses.  Everything written is DER: the shortest length, the
+// shortest integer, and the members of a SET OF in the order of their
+// encodings.
+
+use std.bytes
+use std.list
+use std.str
+use asn1read
+use asn1oid
+use asn1univ
+use asn1err
+use cmserr
+
+// ── reading ──────────────────────────────────────────────────────────
+
+// A value in a buffer.
+pub struct DerNode
+    src: Bytes
+    // Where the value's identifier octet is, and how long the whole value
+    // is, header and content.
+    off: Int
+    len: Int
+    // The class (0 universal, 1 application, 2 context, 3 private), the
+    // tag number and whether the value is constructed.
+    cls: Int
+    num: Int
+    cons: Bool
+    // Where the content starts and how long it is.
+    cstart: Int
+    clen: Int
+    // Whether the length was the BER indefinite form.
+    indef: Bool
+
+fn class_number(c: AsnClass) -> Int
+    match c
+        AsnUniversal   => 0
+        AsnApplication => 1
+        AsnContext     => 2
+        AsnPrivate     => 3
+
+fn malformed(e: AsnDecodeError) -> CmsError
+    CmsMalformed(e.message())
+
+// The value that starts at `off`.
+pub fn node_at(src: Bytes, off: Int) -> Result<DerNode, CmsError> []
+    let limits = asn1read.ber_limits()
+    match asn1read.header_at(src, off, limits)
+        Err(e) => Err(malformed(e))
+        Ok(h)  =>
+            match asn1read.value_span_at(src, off, limits)
+                Err(e) => Err(malformed(e))
+                Ok(whole) =>
+                    match asn1read.content_span_at(src, off, limits)
+                        Err(e) => Err(malformed(e))
+                        Ok(c)  =>
+                            Ok(DerNode { src: src, off: off, len: whole.len,
+                                         cls: class_number(h.tag.class), num: h.tag.number,
+                                         cons: h.tag.constructed, cstart: c.off, clen: c.len,
+                                         indef: h.indefinite })
+
+// The one value a document holds.  Bytes after it are refused.
+pub fn root(src: Bytes) -> Result<DerNode, CmsError> []
+    let n = node_at(src, 0)!
+    if n.len != bytes.len(src)
+        return Err(CmsMalformed("bytes follow the value"))
+    Ok(n)
+
+// The values inside a constructed value, in order.
+pub fn children(n: DerNode) -> Result<[DerNode], CmsError> []
+    if not n.cons
+        return Err(CmsMalformed("a primitive value has no members"))
+    var out: [DerNode] = []
+    var p = n.cstart
+    let end = n.cstart + n.clen
+    for _i in 0..n.clen + 1
+        if p < end
+            let k = node_at(n.src, p)!
+            list.push(out, k)
+            p = p + k.len
+    Ok(out)
+
+// The content octets of a value.
+pub fn content(n: DerNode) -> Bytes []
+    bytes.slice(n.src, n.cstart, n.cstart + n.clen)
+
+// The whole value, header and content, as it arrived.
+pub fn raw(n: DerNode) -> Bytes []
+    bytes.slice(n.src, n.off, n.off + n.len)
+
+// Whether the value is this universal type.
+pub fn is_universal(n: DerNode, tag: Int) -> Bool []
+    n.cls == 0 and n.num == tag
+
+// Whether the value is this context tag.
+pub fn is_context(n: DerNode, num: Int) -> Bool []
+    n.cls == 2 and n.num == num
+
+// The value, refused unless it is this universal type.
+pub fn expect(n: DerNode, tag: Int, what: Str) -> Result<DerNode, CmsError> []
+    if not is_universal(n, tag)
+        return Err(CmsMalformed("${what} is not the expected type"))
+    Ok(n)
+
+// The member at `i` of a constructed value.
+pub fn member(kids: [DerNode], i: Int, what: Str) -> Result<DerNode, CmsError> []
+    if i >= list.len(kids)
+        return Err(CmsMalformed("${what} is missing"))
+    Ok(kids[i])
+
+// The octets of an OCTET STRING, primitive or, in BER, made of chunks.
+pub fn octets(n: DerNode) -> Result<Bytes, CmsError> []
+    if not n.cons
+        return Ok(content(n))
+    var out = bytes.zeros(0)
+    for k in children(n)!
+        out = bytes.concat([out, octets(k)!])
+    Ok(out)
+
+// An INTEGER small enough for an `Int`.
+pub fn int_value(n: DerNode) -> Result<Int, CmsError> []
+    if not is_universal(n, 2) or n.clen < 1 or n.clen > 4
+        return Err(CmsMalformed("an INTEGER of up to four octets"))
+    var v = 0
+    for i in 0..n.clen
+        v = v * 256 + (bytes.byte_at(n.src, n.cstart + i) ?? 0)
+    Ok(v)
+
+// An OBJECT IDENTIFIER as dotted text.
+pub fn oid_text(n: DerNode) -> Result<Str, CmsError> []
+    if not is_universal(n, 6)
+        return Err(CmsMalformed("an OBJECT IDENTIFIER"))
+    match asn1oid.decode(content(n))
+        Err(e) => Err(malformed(e))
+        Ok(o)  => Ok(asn1oid.oid_text(o))
+
+// An AlgorithmIdentifier: the dotted text of its algorithm and, when
+// present, its parameters as the whole encoded value.
+pub struct DerAlg
+    oid: Str
+    params: ?DerNode
+
+pub fn alg_of(n: DerNode) -> Result<DerAlg, CmsError> []
+    let kids = children(n)!
+    let o = oid_text(member(kids, 0, "the algorithm")!)!
+    if list.len(kids) > 1
+        return Ok(DerAlg { oid: o, params: Some(kids[1]) })
+    Ok(DerAlg { oid: o, params: None })
+
+// ── writing ──────────────────────────────────────────────────────────
+
+fn len_bytes(n: Int) -> Bytes
+    if n < 128
+        bytes.u8(n)
+    else if n < 256
+        bytes.concat([bytes.u8(129), bytes.u8(n)])
+    else if n < 65536
+        bytes.concat([bytes.u8(130), bytes.u16_be(n)])
+    else
+        bytes.concat([bytes.u8(132), bytes.u32_be(n)])
+
+// One value: the identifier octet `tag`, the length and the content.
+pub fn tlv(tag: Int, body: Bytes) -> Bytes []
+    bytes.concat([bytes.u8(tag), len_bytes(bytes.len(body)), body])
+
+// A SEQUENCE of members that are already encoded.
+pub fn seq(parts: [Bytes]) -> Bytes []
+    tlv(48, bytes.concat(parts))
+
+// A SET OF members, in the order of their encodings (X.690 section 11.6).
+pub fn set_of(parts: [Bytes]) -> Bytes []
+    var keyed: [Str] = []
+    for p in parts
+        list.push(keyed, bytes.to_hex(p))
+    list.sort(keyed)
+    var out: [Bytes] = []
+    for k in keyed
+        list.push(out, bytes.from_hex(k) ?? bytes.zeros(0))
+    tlv(49, bytes.concat(out))
+
+// An OCTET STRING.
+pub fn oct(b: Bytes) -> Bytes []
+    tlv(4, b)
+
+// A non-negative INTEGER from its big-endian magnitude: leading zeros
+// are dropped and one is added when the top bit is set.
+pub fn int_bytes(mag: Bytes) -> Bytes []
+    var i = 0
+    let n = bytes.len(mag)
+    for _k in 0..n
+        if i < n - 1 and (bytes.byte_at(mag, i) ?? 0) == 0
+            i = i + 1
+    let rest = bytes.slice(mag, i, n)
+    if n == 0
+        return tlv(2, bytes.zeros(1))
+    if (bytes.byte_at(rest, 0) ?? 0) >= 128
+        tlv(2, bytes.concat([bytes.zeros(1), rest]))
+    else
+        tlv(2, rest)
+
+// A small non-negative INTEGER.
+pub fn int_u(v: Int) -> Bytes []
+    int_bytes(bytes.u32_be(v))
+
+// An EXPLICIT or constructed context value `[num]`.
+pub fn ctx(num: Int, body: Bytes) -> Bytes []
+    tlv(160 + num, body)
+
+// A primitive IMPLICIT context value `[num]`.
+pub fn ctx_prim(num: Int, body: Bytes) -> Bytes []
+    tlv(128 + num, body)
+
+// The content octets of an OBJECT IDENTIFIER from its dotted text.
+pub fn oid_content(text: Str) -> Result<Bytes, CmsError> []
+    var arcs: [Int] = []
+    for part in str.split(text, ".")
+        match str.to_int(part)
+            None    => return Err(CmsMalformed("the object identifier ${text}"))
+            Some(v) => list.push(arcs, v)
+    if list.len(arcs) < 2
+        return Err(CmsMalformed("the object identifier ${text}"))
+    var out = bytes.zeros(0)
+    var rest: [Int] = [arcs[0] * 40 + arcs[1]]
+    for i in 2..list.len(arcs)
+        list.push(rest, arcs[i])
+    for a in rest
+        var groups: [Int] = [a % 128]
+        var v = a / 128
+        for _g in 0..10
+            if v > 0
+                list.push(groups, v % 128 + 128)
+                v = v / 128
+        var j = list.len(groups) - 1
+        var enc = bytes.zeros(0)
+        for _x in 0..list.len(groups)
+            enc = bytes.concat([enc, bytes.u8(groups[j])])
+            j = j - 1
+        out = bytes.concat([out, enc])
+    Ok(out)
+
+// An OBJECT IDENTIFIER value from its dotted text.
+pub fn oid(text: Str) -> Result<Bytes, CmsError> []
+    let body = oid_content(text)!
+    Ok(tlv(6, body))
+
+// An AlgorithmIdentifier, with its parameters when given as an encoded
+// value.
+pub fn alg_id(text: Str, params: ?Bytes) -> Result<Bytes, CmsError> []
+    let o = oid(text)!
+    match params
+        None    => Ok(seq([o]))
+        Some(p) => Ok(seq([o, p]))
+
+// The NULL value.
+pub fn null_value() -> Bytes []
+    tlv(5, bytes.zeros(0))
+
+// A UTCTime for a moment in Unix seconds, in the form `YYMMDDHHMMSSZ`
+// of RFC 5652 section 11.3.  Years from 1950 to 2049.
+pub fn utc_time(unix: Int) -> Bytes []
+    let days = unix / 86400
+    let secs = unix % 86400
+    // The civil date from the day number (Howard Hinnant's algorithm).
+    let z = days + 719468
+    let era = z / 146097
+    let doe = z - era * 146097
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+    let y0 = yoe + era * 400
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+    let mp = (5 * doy + 2) / 153
+    let d = doy - (153 * mp + 2) / 5 + 1
+    let m = if mp < 10 then mp + 3 else mp - 9
+    let y = if m <= 2 then y0 + 1 else y0
+    let text = "${two(y % 100)}${two(m)}${two(d)}${two(secs / 3600)}${two(secs % 3600 / 60)}${two(secs % 60)}Z"
+    tlv(23, bytes.from_str(text))
+
+fn two(v: Int) -> Str
+    str.pad_left(str.from_int(v), 2, "0")

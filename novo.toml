@@ -1,0 +1,24 @@
+[package]
+name        = "cms-nv"
+version     = "0.1.0"
+description = "test"
+license     = "Apache-2.0"
+stability   = "experimental"
+layer       = "core"
+category    = "crypto"
+tags        = ["cms"]
+repository  = "https://github.com/novolang/cms-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.24.1"
+
+[docs.pages]
+"README.md" = "x"
+
+[dependencies]
+asn1-nv    = "^0.1.1"
+x509-nv    = "^0.1.0"
+crypto-nv  = "^0.1.8"
+rsa-nv     = "^0.1.0"
+p256-nv    = "^0.1.1"
+ed25519-nv = "^0.1.1"
+pbkdf2-nv  = "^0.1.0"

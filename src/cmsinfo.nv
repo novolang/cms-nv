@@ -1,0 +1,251 @@
+// cmsinfo.nv — ContentInfo (RFC 5652 section 3) and the content types
+// that need no key or certificate: data (section 4), digested-data
+// (section 7) and encrypted-data (section 8), with the EncryptedContentInfo
+// that encrypted-data shares with enveloped-data.
+//
+// A ContentInfo is a content type and, optionally, the content under an
+// EXPLICIT `[0]` tag.  `read` answers the type and the content as a value
+// in the caller's bytes; the readers of each type check the type first.
+//
+// Encrypted content is AES-CBC (RFC 3565) with PKCS #7 padding.  The
+// content encryption algorithms of the registry packages stop there:
+// DES-EDE3-CBC and RC2-CBC are named in the type's tables and refused as
+// not implemented, with the algorithm in the message.
+
+use std.bytes
+use std.list
+use cmserr
+use cmsoid
+use cmsder
+use cmscrypto
+
+// ── ContentInfo ──────────────────────────────────────────────────────
+
+// A ContentInfo: the dotted content type and the content value, if any.
+pub struct CmsInfo
+    content_type: Str
+    content: ?DerNode
+
+// Read a ContentInfo.  BER is accepted, as a streaming encoder writes it.
+pub fn read(src: Bytes) -> Result<CmsInfo, CmsError> []
+    let top = cmsder.root(src)!
+    cmsder.expect(top, 16, "a ContentInfo")!
+    let kids = cmsder.children(top)!
+    let ct = cmsder.oid_text(cmsder.member(kids, 0, "the content type")!)!
+    if list.len(kids) == 1
+        return Ok(CmsInfo { content_type: ct, content: None })
+    let wrapper = kids[1]
+    if not cmsder.is_context(wrapper, 0) or not wrapper.cons
+        return Err(CmsMalformed("the content is under [0]"))
+    let inner = cmsder.children(wrapper)!
+    let value = cmsder.member(inner, 0, "the content")!
+    Ok(CmsInfo { content_type: ct, content: Some(value) })
+
+// The content of a ContentInfo of this type, or the refusal.
+pub fn content_of(info: CmsInfo, want: Str) -> Result<DerNode, CmsError> []
+    if info.content_type != want
+        return Err(CmsWrongContentType(info.content_type, want))
+    match info.content
+        None    => Err(CmsNoContent)
+        Some(c) => Ok(c)
+
+// A ContentInfo from a content type and an encoded content value.
+pub fn write(content_type: Str, value: Bytes) -> Result<Bytes, CmsError> []
+    let o = cmsder.oid(content_type)!
+    Ok(cmsder.seq([o, cmsder.ctx(0, value)]))
+
+// ── data ─────────────────────────────────────────────────────────────
+
+// The octets of a ContentInfo of type data.
+pub fn data_read(src: Bytes) -> Result<Bytes, CmsError> []
+    let info = read(src)!
+    let c = content_of(info, OID_DATA)!
+    cmsder.expect(c, 4, "the data")!
+    cmsder.octets(c)
+
+// A ContentInfo of type data.
+pub fn data_write(payload: Bytes) -> Result<Bytes, CmsError> []
+    write(OID_DATA, cmsder.oct(payload))
+
+// ── digested-data ────────────────────────────────────────────────────
+
+// A DigestedData.
+pub struct CmsDigested
+    digest_alg: Str
+    content_type: Str
+    // The encapsulated content; `None` when it travels elsewhere.
+    content: ?Bytes
+    digest: Bytes
+
+// Read a ContentInfo of type digested-data.
+pub fn digested_read(src: Bytes) -> Result<CmsDigested, CmsError> []
+    let info = read(src)!
+    let sd = cmsder.expect(content_of(info, OID_DIGESTED_DATA)!, 16, "the DigestedData")!
+    let kids = cmsder.children(sd)!
+    let alg = cmsder.alg_of(cmsder.member(kids, 1, "the digest algorithm")!)!
+    let eci = cmsder.children(cmsder.member(kids, 2, "the encapsulated content")!)!
+    let ct = cmsder.oid_text(cmsder.member(eci, 0, "the content type")!)!
+    var body: ?Bytes = None
+    if list.len(eci) > 1
+        let wrapper = eci[1]
+        if not cmsder.is_context(wrapper, 0)
+            return Err(CmsMalformed("the content is under [0]"))
+        let inner = cmsder.children(wrapper)!
+        body = Some(cmsder.octets(cmsder.member(inner, 0, "the content")!)!)
+    let digest = cmsder.octets(cmsder.member(kids, 3, "the digest")!)!
+    Ok(CmsDigested { digest_alg: alg.oid, content_type: ct, content: body, digest: digest })
+
+// Check the digest of the content, and answer the content.  `detached` is
+// the content when the message carries none.
+pub fn digested_verify(d: CmsDigested, detached: ?Bytes) -> Result<Bytes, CmsError> []
+    var body = bytes.zeros(0)
+    match d.content
+        Some(c) =>
+            if detached != None
+                return Err(CmsDetachedConflict)
+            body = bytes.clone(c)
+        None    =>
+            match detached
+                None    => return Err(CmsNoContent)
+                Some(x) => body = bytes.clone(x)
+    let want = cmscrypto.digest_of(d.digest_alg, body)!
+    if not digest_equal(want, d.digest)
+        return Err(CmsAuthFailed)
+    Ok(body)
+
+fn digest_equal(a: Bytes, b: Bytes) -> Bool
+    bytes.to_hex(a) == bytes.to_hex(b)
+
+// A ContentInfo of type digested-data over `payload`, with the content
+// encapsulated unless `detach`.
+pub fn digested_write(alg: Str, payload: Bytes, detach: Bool) -> Result<Bytes, CmsError> []
+    let digest = cmscrypto.digest_of(alg, payload)!
+    let ct = cmsder.oid(OID_DATA)!
+    var eci = cmsder.seq([ct])
+    if not detach
+        eci = cmsder.seq([ct, cmsder.ctx(0, cmsder.oct(payload))])
+    let body = cmsder.seq([cmsder.int_u(0), cmsder.alg_id(alg, None)!, eci, cmsder.oct(digest)])
+    write(OID_DIGESTED_DATA, body)
+
+// ── EncryptedContentInfo ─────────────────────────────────────────────
+
+// An EncryptedContentInfo (RFC 5652 section 6.1).
+pub struct CmsEci
+    content_type: Str
+    // The content encryption algorithm's object identifier.
+    enc_alg: Str
+    // The initialization vector of AES-CBC, or the nonce of AES-GCM.
+    iv: Bytes
+    // The ICV length of AES-GCM (RFC 5084 section 3.2), 12 when absent;
+    // 0 for CBC.
+    icv_len: Int
+    // The encrypted content; `None` when it travels elsewhere.
+    encrypted: ?Bytes
+
+// The key length of a content encryption algorithm, 0 for another.
+pub fn enc_key_len(alg: Str) -> Int []
+    match alg
+        "2.16.840.1.101.3.4.1.2"  => 16
+        "2.16.840.1.101.3.4.1.22" => 24
+        "2.16.840.1.101.3.4.1.42" => 32
+        "2.16.840.1.101.3.4.1.6"  => 16
+        "2.16.840.1.101.3.4.1.26" => 24
+        "2.16.840.1.101.3.4.1.46" => 32
+        _                         => 0
+
+// Whether the algorithm is AES-GCM.
+pub fn is_gcm(alg: Str) -> Bool []
+    alg == OID_AES128_GCM or alg == OID_AES192_GCM or alg == OID_AES256_GCM
+
+fn refuse_alg(alg: Str) -> CmsError
+    if alg == OID_DES_EDE3_CBC
+        return CmsNotImplemented("DES-EDE3-CBC content encryption: the registry has no 3DES")
+    if alg == OID_RC2_CBC
+        return CmsNotImplemented("RC2-CBC content encryption: the registry has no RC2")
+    CmsUnsupportedAlg(alg)
+
+// Read an EncryptedContentInfo from its SEQUENCE.
+pub fn eci_read(n: DerNode) -> Result<CmsEci, CmsError> []
+    cmsder.expect(n, 16, "the EncryptedContentInfo")!
+    let kids = cmsder.children(n)!
+    let ct = cmsder.oid_text(cmsder.member(kids, 0, "the content type")!)!
+    let alg = cmsder.alg_of(cmsder.member(kids, 1, "the content encryption algorithm")!)!
+    var iv = bytes.zeros(0)
+    var icv = 0
+    if enc_key_len(alg.oid) > 0
+        match alg.params
+            None    => return Err(CmsMalformed("the content encryption parameters"))
+            Some(p) =>
+                if is_gcm(alg.oid)
+                    let pk = cmsder.children(p)!
+                    iv = cmsder.octets(cmsder.member(pk, 0, "the nonce")!)!
+                    icv = 12
+                    if list.len(pk) > 1
+                        icv = cmsder.int_value(pk[1])!
+                else
+                    iv = cmsder.octets(p)!
+    else
+        return Err(refuse_alg(alg.oid))
+    var body: ?Bytes = None
+    if list.len(kids) > 2
+        let c = kids[2]
+        if not cmsder.is_context(c, 0)
+            return Err(CmsMalformed("the encrypted content is [0]"))
+        body = Some(cmsder.octets(c)!)
+    Ok(CmsEci { content_type: ct, enc_alg: alg.oid, iv: iv, icv_len: icv, encrypted: body })
+
+// Decrypt AES-CBC content under the content encryption key.
+pub fn eci_decrypt(e: CmsEci, cek: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+    if is_gcm(e.enc_alg)
+        return Err(CmsMalformed("AES-GCM content is AuthEnvelopedData, not EnvelopedData"))
+    if bytes.len(cek) != enc_key_len(e.enc_alg)
+        return Err(CmsBadKey("the content key of ${e.enc_alg} is ${enc_key_len(e.enc_alg)} bytes"))
+    var ct = bytes.zeros(0)
+    match e.encrypted
+        Some(c) =>
+            if detached != None
+                return Err(CmsDetachedConflict)
+            ct = bytes.clone(c)
+        None    =>
+            match detached
+                None    => return Err(CmsNoContent)
+                Some(x) => ct = bytes.clone(x)
+    cmscrypto.cbc_decrypt(cek, e.iv, ct)
+
+// An EncryptedContentInfo of content type data, AES-CBC, with the
+// ciphertext encapsulated unless `detach`.
+pub fn eci_write(alg: Str, cek: Bytes, iv: Bytes, plain: Bytes, detach: Bool) -> Result<Bytes, CmsError> []
+    if enc_key_len(alg) == 0 or is_gcm(alg)
+        return Err(CmsUnsupportedAlg(alg))
+    if bytes.len(cek) != enc_key_len(alg)
+        return Err(CmsBadKey("the content key of ${alg} is ${enc_key_len(alg)} bytes"))
+    let ct = cmscrypto.cbc_encrypt(cek, iv, plain)!
+    let head = [cmsder.oid(OID_DATA)!, cmsder.alg_id(alg, Some(cmsder.oct(iv)))!]
+    if detach
+        return Ok(cmsder.seq(head))
+    Ok(cmsder.seq(list.concat(head, [cmsder.ctx_prim(0, ct)])))
+
+// ── encrypted-data ───────────────────────────────────────────────────
+
+// An EncryptedData: the EncryptedContentInfo under a version.
+pub struct CmsEncrypted
+    version: Int
+    eci: CmsEci
+
+// Read a ContentInfo of type encrypted-data.
+pub fn encrypted_read(src: Bytes) -> Result<CmsEncrypted, CmsError> []
+    let info = read(src)!
+    let sd = cmsder.expect(content_of(info, OID_ENCRYPTED_DATA)!, 16, "the EncryptedData")!
+    let kids = cmsder.children(sd)!
+    let v = cmsder.int_value(cmsder.member(kids, 0, "the version")!)!
+    let eci = eci_read(cmsder.member(kids, 1, "the EncryptedContentInfo")!)!
+    Ok(CmsEncrypted { version: v, eci: eci })
+
+// Decrypt an EncryptedData under the key the caller holds.
+pub fn encrypted_decrypt(e: CmsEncrypted, key: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+    eci_decrypt(e.eci, key, detached)
+
+// A ContentInfo of type encrypted-data.
+pub fn encrypted_write(alg: Str, key: Bytes, iv: Bytes, plain: Bytes, detach: Bool) -> Result<Bytes, CmsError> []
+    let eci = eci_write(alg, key, iv, plain, detach)!
+    write(OID_ENCRYPTED_DATA, cmsder.seq([cmsder.int_u(0), eci]))

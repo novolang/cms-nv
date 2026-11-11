@@ -1,0 +1,259 @@
+// cmscrypto.nv — the symmetric primitives CMS builds on, applied to bytes:
+// the digests of RFC 5652 section 5.1, AES-CBC with PKCS #7 padding, the
+// AES key wrap of RFC 3394 (KEKRecipientInfo), the key wrap of RFC 3211
+// section 2.3 (PasswordRecipientInfo), and AES-GCM (RFC 5084).
+//
+// crypto-nv supplies the AES block, SHA-1 and SHA-2, and AES-GCM.  It has
+// no CBC mode and no key wrap, so those are written here on the block
+// function.  Two key wraps are in a CMS message and they are different
+// algorithms: a KEKRecipientInfo names an RFC 3394 wrap by its object
+// identifier, and a PasswordRecipientInfo wraps with the CBC construction
+// of RFC 3211, whatever cipher its parameter names.
+
+use std.bytes
+use std.list
+use aes
+use aes_core
+use gcm
+use hashing
+use digest
+use cmserr
+use cmsoid
+
+// ── digests ──────────────────────────────────────────────────────────
+
+// The digest of `data` by the algorithm with this object identifier:
+// SHA-1, SHA-256, SHA-384 or SHA-512.
+pub fn digest_of(alg: Str, data: Bytes) -> Result<Bytes, CmsError> []
+    match alg
+        "1.3.14.3.2.26"          => Ok(hashing.sha1(data))
+        "2.16.840.1.101.3.4.2.1" => Ok(hashing.sha256(data))
+        "2.16.840.1.101.3.4.2.2" => Ok(hashing.sha384(data))
+        "2.16.840.1.101.3.4.2.3" => Ok(hashing.sha512(data))
+        _                        => Err(CmsUnsupportedAlg(alg))
+
+// The digest length of an algorithm, or 0 for one that is not implemented.
+pub fn digest_len(alg: Str) -> Int []
+    match alg
+        "1.3.14.3.2.26"          => 20
+        "2.16.840.1.101.3.4.2.1" => 32
+        "2.16.840.1.101.3.4.2.2" => 48
+        "2.16.840.1.101.3.4.2.3" => 64
+        _                        => 0
+
+// ── AES-CBC ──────────────────────────────────────────────────────────
+
+fn xor_block(a: AesBlock, b: AesBlock) -> AesBlock
+    AesBlock { lo: a.lo ^ b.lo, hi: a.hi ^ b.hi }
+
+fn aes_key(key: Bytes) -> Result<AesKey, CmsError>
+    match aes.expand_key(key)
+        None    => Err(CmsBadKey("an AES key is 16, 24 or 32 bytes"))
+        Some(k) => Ok(k)
+
+// AES-CBC over a whole number of blocks, no padding.
+pub fn cbc_encrypt_raw(key: Bytes, iv: Bytes, data: Bytes) -> Result<Bytes, CmsError> []
+    let k = aes_key(key)!
+    if bytes.len(iv) != 16 or bytes.len(data) % 16 != 0
+        return Err(CmsBadKey("CBC takes a 16-byte IV and whole blocks"))
+    var buf = bytes.clone(data)
+    var prev = aes.block_at(iv, 0)
+    var off = 0
+    for _b in 0..bytes.len(data) / 16
+        let c = aes_core.encrypt_block(k, xor_block(aes.block_at(buf, off), prev))
+        aes.store_block(var buf, off, c)
+        prev = c
+        off = off + 16
+    Ok(buf)
+
+// The inverse of `cbc_encrypt_raw`.
+pub fn cbc_decrypt_raw(key: Bytes, iv: Bytes, data: Bytes) -> Result<Bytes, CmsError> []
+    let k = aes_key(key)!
+    if bytes.len(iv) != 16 or bytes.len(data) % 16 != 0
+        return Err(CmsBadKey("CBC takes a 16-byte IV and whole blocks"))
+    var buf = bytes.zeros(bytes.len(data))
+    var prev = aes.block_at(iv, 0)
+    var off = 0
+    for _b in 0..bytes.len(data) / 16
+        let c = aes.block_at(data, off)
+        aes.store_block(var buf, off, xor_block(aes_core.decrypt_block(k, c), prev))
+        prev = c
+        off = off + 16
+    Ok(buf)
+
+// `plain` padded as PKCS #7 (RFC 5652 section 6.3).
+pub fn pad(plain: Bytes) -> Bytes []
+    let n = bytes.len(plain)
+    let p = 16 - n % 16
+    var buf = bytes.zeros(n + p)
+    bytes.copy_into(buf, 0, plain, 0, n)
+    bytes.fill(buf, n, p, p)
+    buf
+
+// The content of a padded buffer, or `None` when the padding is not
+// well-formed.  Every pad byte is checked.
+pub fn unpad(buf: Bytes) -> ?Bytes []
+    let n = bytes.len(buf)
+    if n == 0 or n % 16 != 0
+        return None
+    let p = bytes.byte_at(buf, n - 1) ?? 0
+    if p < 1 or p > 16
+        return None
+    var bad = 0
+    for i in 0..p
+        bad = bad | ((bytes.byte_at(buf, n - 1 - i) ?? 0) ^ p)
+    if bad != 0
+        None
+    else
+        Some(bytes.slice(buf, 0, n - p))
+
+// AES-CBC with PKCS #7 padding.
+pub fn cbc_encrypt(key: Bytes, iv: Bytes, plain: Bytes) -> Result<Bytes, CmsError> []
+    cbc_encrypt_raw(key, iv, pad(plain))
+
+// AES-CBC with the padding removed.  A ciphertext that is not whole blocks
+// or whose padding is wrong is `CmsAuthFailed`: CBC has no tag, and the
+// padding is the only check there is.
+pub fn cbc_decrypt(key: Bytes, iv: Bytes, ct: Bytes) -> Result<Bytes, CmsError> []
+    if bytes.len(ct) == 0 or bytes.len(ct) % 16 != 0
+        return Err(CmsAuthFailed)
+    let p = cbc_decrypt_raw(key, iv, ct)!
+    match unpad(p)
+        None    => Err(CmsAuthFailed)
+        Some(m) => Ok(m)
+
+// ── AES key wrap, RFC 3394 ───────────────────────────────────────────
+
+fn kw_iv() -> Bytes
+    bytes.from_hex("a6a6a6a6a6a6a6a6") ?? bytes.zeros(8)
+
+fn xor_counter(a: Bytes, t: Int) -> Bytes
+    var out = bytes.clone(a)
+    let tb = bytes.u64_be(t)
+    for i in 0..8
+        bytes.set_u8(out, i, (bytes.byte_at(a, i) ?? 0) ^ (bytes.byte_at(tb, i) ?? 0))
+    out
+
+// Wrap `cek`, a multiple of 8 bytes and at least 16, under `kek`.
+pub fn kw_wrap(kek: Bytes, cek: Bytes) -> Result<Bytes, CmsError> []
+    let len = bytes.len(cek)
+    if len < 16 or len % 8 != 0
+        return Err(CmsBadKey("the key to wrap is a multiple of 8 bytes and at least 16"))
+    let k = aes_key(kek)!
+    let n = len / 8
+    var r = bytes.clone(cek)
+    var a = kw_iv()
+    for j in 0..6
+        for i in 0..n
+            let blk = bytes.concat([a, bytes.slice(r, i * 8, i * 8 + 8)])
+            let b = aes.encrypt_block(k, blk) ?? bytes.zeros(16)
+            a = xor_counter(bytes.slice(b, 0, 8), n * j + i + 1)
+            bytes.copy_into(r, i * 8, b, 8, 8)
+    Ok(bytes.concat([a, r]))
+
+// Unwrap a key; the integrity check failing is `CmsAuthFailed`.
+pub fn kw_unwrap(kek: Bytes, wrapped: Bytes) -> Result<Bytes, CmsError> []
+    let len = bytes.len(wrapped)
+    if len < 24 or len % 8 != 0
+        return Err(CmsAuthFailed)
+    let k = aes_key(kek)!
+    let n = len / 8 - 1
+    var r = bytes.slice(wrapped, 8, len)
+    var a = bytes.slice(wrapped, 0, 8)
+    var j = 5
+    for _o in 0..6
+        var i = n - 1
+        for _p in 0..n
+            let blk = bytes.concat([xor_counter(a, n * j + i + 1), bytes.slice(r, i * 8, i * 8 + 8)])
+            let b = aes.decrypt_block(k, blk) ?? bytes.zeros(16)
+            a = bytes.slice(b, 0, 8)
+            bytes.copy_into(r, i * 8, b, 8, 8)
+            i = i - 1
+        j = j - 1
+    if digest.ct_eq(a, kw_iv())
+        Ok(r)
+    else
+        Err(CmsAuthFailed)
+
+// ── the key wrap of RFC 3211 section 2.3 ─────────────────────────────
+
+// How many bytes of padding the wrap of a key of `n` bytes carries: the
+// plaintext is a length octet, three check octets, the key and the
+// padding, a whole number of 16-byte blocks and at least two.
+pub fn pwri_pad_len(n: Int) -> Int []
+    let used = 4 + n
+    if used < 32
+        32 - used
+    else
+        (16 - used % 16) % 16
+
+// Wrap `cek` under `kek` with the 16-byte `iv`, as RFC 3211 section 2.3.1:
+// the check octets are the complement of the first three key octets, and
+// the key is encrypted twice in CBC mode, the second time with the last
+// ciphertext block of the first as the IV.  `padding` supplies the pad
+// octets, at least `pwri_pad_len(n)` of them; RFC 3211 asks for random
+// ones and this package draws none.
+pub fn pwri_wrap(kek: Bytes, iv: Bytes, cek: Bytes, padding: Bytes) -> Result<Bytes, CmsError> []
+    let n = bytes.len(cek)
+    if n < 4 or n > 255
+        return Err(CmsBadKey("the key to wrap is 4 to 255 bytes"))
+    let need = pwri_pad_len(n)
+    if bytes.len(padding) < need
+        return Err(CmsBadKey("the padding is ${need} bytes"))
+    var check = bytes.zeros(3)
+    for i in 0..3
+        bytes.set_u8(check, i, 255 - (bytes.byte_at(cek, i) ?? 0))
+    let plain = bytes.concat([bytes.u8(n), check, cek, bytes.slice(padding, 0, need)])
+    let pass1 = cbc_encrypt_raw(kek, iv, plain)!
+    let total = bytes.len(pass1)
+    cbc_encrypt_raw(kek, bytes.slice(pass1, total - 16, total), pass1)
+
+// The inverse of `pwri_wrap`.  A wrapped key that does not decrypt to a
+// consistent length and check is `CmsAuthFailed`.
+pub fn pwri_unwrap(kek: Bytes, iv: Bytes, wrapped: Bytes) -> Result<Bytes, CmsError> []
+    let total = bytes.len(wrapped)
+    if total < 32 or total % 16 != 0
+        return Err(CmsAuthFailed)
+    // The last block of the first pass: decrypt the last block with the
+    // block before it as the IV.
+    let last = cbc_decrypt_raw(kek, bytes.slice(wrapped, total - 32, total - 16), bytes.slice(wrapped, total - 16, total))!
+    // The first pass, recovered by decrypting the other blocks with that
+    // last block as the IV.
+    let head = cbc_decrypt_raw(kek, last, bytes.slice(wrapped, 0, total - 16))!
+    let pass1 = bytes.concat([head, last])
+    let plain = cbc_decrypt_raw(kek, iv, pass1)!
+    let n = bytes.byte_at(plain, 0) ?? 0
+    if n < 4 or n + 4 > total
+        return Err(CmsAuthFailed)
+    var bad = 0
+    for i in 0..3
+        bad = bad | (((bytes.byte_at(plain, 1 + i) ?? 0) ^ (bytes.byte_at(plain, 4 + i) ?? 0)) ^ 255)
+    if bad != 0
+        return Err(CmsAuthFailed)
+    Ok(bytes.slice(plain, 4, 4 + n))
+
+// ── AES-GCM, RFC 5084 ────────────────────────────────────────────────
+
+// A GCM ciphertext and its tag.
+pub struct CmsSealed
+    ciphertext: Bytes
+    tag: Bytes
+
+// Encrypt and authenticate.  The nonce is the caller's.
+pub fn gcm_seal(key: Bytes, nonce: Bytes, aad: Bytes, plain: Bytes) -> Result<CmsSealed, CmsError> []
+    let k = aes_key(key)!
+    match gcm.seal(k, nonce, aad, plain)
+        None    => Err(CmsBadKey("the nonce is not empty"))
+        Some(s) =>
+            let n = bytes.len(s) - 16
+            Ok(CmsSealed { ciphertext: bytes.slice(s, 0, n), tag: bytes.slice(s, n, n + 16) })
+
+// Check the tag and decrypt; nothing of the plaintext is produced when the
+// tag does not match.  Only the 16-byte tag is implemented.
+pub fn gcm_open(key: Bytes, nonce: Bytes, aad: Bytes, ct: Bytes, tag: Bytes) -> Result<Bytes, CmsError> []
+    if bytes.len(tag) != 16
+        return Err(CmsNotImplemented("an AES-GCM tag of ${bytes.len(tag)} bytes, only 16 is implemented"))
+    let k = aes_key(key)!
+    match gcm.open(k, nonce, aad, bytes.concat([ct, tag]))
+        None    => Err(CmsAuthFailed)
+        Some(p) => Ok(p)

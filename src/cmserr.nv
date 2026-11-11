@@ -1,0 +1,50 @@
+// cmserr.nv — why a CMS operation was refused.
+//
+// Every variant is a refusal of the message, the key or the arguments,
+// never a report that the arithmetic failed.  `CmsAuthFailed` carries
+// nothing on purpose: a signature, a digest and an authentication tag that
+// do not verify are told apart from every other fault, and from each other,
+// by the operation the caller called and by nothing the message can
+// influence.
+
+// Why a CMS operation could not be completed.
+pub enum CmsError
+    // The bytes are not the structure the operation reads: a tag, a length
+    // or a member that RFC 5652 does not allow here.  `what` names it.
+    CmsMalformed(what: Str)
+    // A structure whose bytes a signature covers is not DER.
+    CmsNotDer(what: Str)
+    // The ContentInfo holds another content type than the operation reads.
+    CmsWrongContentType(got: Str, want: Str)
+    // An algorithm identifier this package does not implement.
+    CmsUnsupportedAlg(alg: Str)
+    // A feature of RFC 5652 that this package states as not implemented.
+    CmsNotImplemented(what: Str)
+    // A key or certificate that is not usable for the operation.
+    CmsBadKey(what: Str)
+    // A signed attribute that is missing, repeated or does not match.
+    CmsBadAttribute(what: Str)
+    // The digest, signature, MAC or authentication tag did not verify.
+    CmsAuthFailed
+    // The message carries no content and none was supplied, or it carries
+    // its own and one was supplied as well.
+    CmsNoContent
+    CmsDetachedConflict
+    // No signer, certificate or recipient matches what the caller named.
+    CmsNoMatch(what: Str)
+
+// What went wrong, in words, for a caller that logs rather than branches.
+impl Error for CmsError
+    fn message(self) -> Str
+        match self
+            CmsMalformed(what)             => "cms: malformed structure: ${what}"
+            CmsNotDer(what)                => "cms: not DER: ${what}"
+            CmsWrongContentType(got, want) => "cms: content type ${got} where ${want} was expected"
+            CmsUnsupportedAlg(alg)         => "cms: algorithm ${alg} is not implemented"
+            CmsNotImplemented(what)        => "cms: not implemented: ${what}"
+            CmsBadKey(what)                => "cms: unusable key: ${what}"
+            CmsBadAttribute(what)          => "cms: bad attribute: ${what}"
+            CmsAuthFailed                  => "cms: the signature, digest or tag did not verify"
+            CmsNoContent                   => "cms: the message has detached content and none was supplied"
+            CmsDetachedConflict            => "cms: content was supplied for a message that carries its own"
+            CmsNoMatch(what)               => "cms: no match: ${what}"
