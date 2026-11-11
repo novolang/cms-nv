@@ -1,0 +1,526 @@
+// cmssigned.nv — SignedData (RFC 5652 section 5), the degenerate form that
+// carries only certificates, and the signature algorithms of RFC 3370,
+// RFC 4056 (RSASSA-PSS), RFC 5753 (ECDSA) and RFC 8419 (Ed25519).
+//
+// A SignedData has an encapsulated content, the digest algorithms in use,
+// the certificates and revocation lists the sender chose to include, and
+// one SignerInfo for each signer.  A SignerInfo names its certificate by
+// issuer and serial number or by subject key identifier, names the digest
+// algorithm, may carry signed attributes, and holds the signature.
+//
+// Signed attributes.  When a SignerInfo has them the signature covers
+// their DER encoding as a SET OF, not the content (section 5.4): the
+// attributes arrive under the tag `[0]`, the tag byte is replaced by the
+// SET OF tag, and the bytes are otherwise exactly as received.  The
+// message-digest attribute carries the digest of the content and the
+// content-type attribute the content type, and `verify` checks both.  A
+// SignerInfo without them is signed over the content itself.
+//
+// What is verified.  `verify` checks one SignerInfo against a certificate
+// the caller names: the signature, and the digest and content type in the
+// attributes.  It does not build a chain, check the certificate's validity
+// or purposes, or look at a revocation list; the chain is the caller's, and
+// x509-nv has the tools for it.  `find_certificate` picks the included
+// certificate that a SignerInfo names.
+//
+// Algorithms.  RSASSA-PKCS1-v1_5 and RSASSA-PSS with SHA-256 or SHA-384
+// verify, through rsa-nv; ECDSA on P-256 with SHA-256 or SHA-384 (the
+// digest cut to its leftmost 256 bits as FIPS 186-4 says) and Ed25519
+// verify and sign.  RSA signing is not implemented, because rsa-nv does
+// not sign; SHA-1 and SHA-512 with RSA are not implemented, because rsa-nv
+// verifies SHA-256 and SHA-384 only; and the countersignature attribute
+// (section 11.4) is not read.
+
+use std.bytes
+use std.list
+use asn1read
+use asn1pkix
+use asn1oid
+use x509cert
+use x509ext
+use rsa
+use p256
+use ed25519
+use hashing
+use digest
+use cmserr
+use cmsoid
+use cmsder
+use cmscrypto
+use cmsinfo
+
+// One signed attribute: its object identifier and the values, each as
+// the whole encoded value.
+pub struct CmsAttr
+    oid: Str
+    values: [Bytes]
+
+// One SignerInfo.
+pub struct CmsSigner
+    version: Int
+    // The certificate the signer names: an issuer (a Name, as encoded) and
+    // a serial number (the INTEGER's content), or a subject key identifier.
+    issuer: Bytes
+    serial: Bytes
+    ski: Bytes
+    digest_alg: Str
+    // The signed attributes, as the `[0]` value that arrived, and parsed.
+    attrs_raw: ?Bytes
+    attrs: [CmsAttr]
+    sig_alg: Str
+    sig_params: ?DerNode
+    signature: Bytes
+
+// A SignedData.
+pub struct CmsSigned
+    version: Int
+    digest_algs: [Str]
+    content_type: Str
+    // The encapsulated content; `None` when it travels elsewhere.
+    content: ?Bytes
+    // The certificates (each as DER) and revocation lists (each as the
+    // whole encoded value) the message carries.
+    certs: [Bytes]
+    crls: [Bytes]
+    signers: [CmsSigner]
+
+// ── reading ──────────────────────────────────────────────────────────
+
+fn attr_read(n: DerNode) -> Result<CmsAttr, CmsError>
+    let kids = cmsder.children(n)!
+    let o = cmsder.oid_text(cmsder.member(kids, 0, "the attribute type")!)!
+    let set = cmsder.member(kids, 1, "the attribute values")!
+    if not cmsder.is_universal(set, 17)
+        return Err(CmsMalformed("the attribute values are a SET"))
+    var vs: [Bytes] = []
+    for v in cmsder.children(set)!
+        list.push(vs, cmsder.raw(v))
+    Ok(CmsAttr { oid: o, values: vs })
+
+fn signer_read(n: DerNode) -> Result<CmsSigner, CmsError>
+    let kids = cmsder.children(n)!
+    let v = cmsder.int_value(cmsder.member(kids, 0, "the version")!)!
+    let sid = cmsder.member(kids, 1, "the signer identifier")!
+    var issuer = bytes.zeros(0)
+    var serial = bytes.zeros(0)
+    var ski = bytes.zeros(0)
+    if cmsder.is_universal(sid, 16)
+        let parts = cmsder.children(sid)!
+        issuer = cmsder.raw(cmsder.member(parts, 0, "the issuer")!)
+        serial = cmsder.content(cmsder.member(parts, 1, "the serial number")!)
+    else if cmsder.is_context(sid, 0)
+        ski = cmsder.octets(sid)!
+    else
+        return Err(CmsMalformed("the signer identifier"))
+    let dalg = cmsder.alg_of(cmsder.member(kids, 2, "the digest algorithm")!)!
+    var at = 3
+    var raw: ?Bytes = None
+    var attrs: [CmsAttr] = []
+    if list.len(kids) > at and cmsder.is_context(kids[at], 0)
+        if kids[at].indef
+            return Err(CmsNotDer("the signed attributes use the indefinite length"))
+        raw = Some(cmsder.raw(kids[at]))
+        for a in cmsder.children(kids[at])!
+            let parsed = attr_read(a)!
+            list.push(attrs, parsed)
+        at = 4
+    let salg = cmsder.alg_of(cmsder.member(kids, at, "the signature algorithm")!)!
+    let sig = cmsder.octets(cmsder.member(kids, at + 1, "the signature")!)!
+    Ok(CmsSigner { version: v, issuer: issuer, serial: serial, ski: ski, digest_alg: dalg.oid,
+                   attrs_raw: raw, attrs: attrs, sig_alg: salg.oid, sig_params: salg.params, signature: sig })
+
+// Read a ContentInfo of type signed-data.
+pub fn read(src: Bytes) -> Result<CmsSigned, CmsError> []
+    let info = cmsinfo.read(src)!
+    let sd = cmsder.expect(cmsinfo.content_of(info, OID_SIGNED_DATA)!, 16, "the SignedData")!
+    let kids = cmsder.children(sd)!
+    let v = cmsder.int_value(cmsder.member(kids, 0, "the version")!)!
+    let algs_set = cmsder.member(kids, 1, "the digest algorithms")!
+    var algs: [Str] = []
+    for a in cmsder.children(algs_set)!
+        let parsed = cmsder.alg_of(a)!
+        list.push(algs, parsed.oid)
+    let eci = cmsder.children(cmsder.member(kids, 2, "the encapsulated content")!)!
+    let ct = cmsder.oid_text(cmsder.member(eci, 0, "the content type")!)!
+    var body: ?Bytes = None
+    if list.len(eci) > 1
+        if not cmsder.is_context(eci[1], 0)
+            return Err(CmsMalformed("the content is under [0]"))
+        let inner = cmsder.children(eci[1])!
+        body = Some(cmsder.octets(cmsder.member(inner, 0, "the content")!)!)
+    var at = 3
+    var certs: [Bytes] = []
+    var crls: [Bytes] = []
+    if list.len(kids) > at and cmsder.is_context(kids[at], 0)
+        for c in cmsder.children(kids[at])!
+            if cmsder.is_universal(c, 16)
+                list.push(certs, cmsder.raw(c))
+        at = at + 1
+    if list.len(kids) > at and cmsder.is_context(kids[at], 1)
+        for c in cmsder.children(kids[at])!
+            list.push(crls, cmsder.raw(c))
+        at = at + 1
+    let signer_set = cmsder.member(kids, at, "the signer infos")!
+    if not cmsder.is_universal(signer_set, 17)
+        return Err(CmsMalformed("the signer infos are a SET"))
+    var signers: [CmsSigner] = []
+    for s in cmsder.children(signer_set)!
+        let parsed = signer_read(s)!
+        list.push(signers, parsed)
+    Ok(CmsSigned { version: v, digest_algs: algs, content_type: ct, content: body, certs: certs,
+                   crls: crls, signers: signers })
+
+// Whether the message is the degenerate form that carries certificates and
+// no signers (the PKCS #7 certificate bag).
+pub fn is_certs_only(sd: CmsSigned) -> Bool []
+    list.len(sd.signers) == 0 and list.len(sd.certs) > 0
+
+// ── certificates ─────────────────────────────────────────────────────
+
+fn trim_zeros(b: Bytes) -> Str
+    var i = 0
+    let n = bytes.len(b)
+    for _k in 0..n
+        if i < n - 1 and (bytes.byte_at(b, i) ?? 0) == 0
+            i = i + 1
+    bytes.to_hex(bytes.slice(b, i, n))
+
+fn cert_of(der: Bytes) -> Result<X509Cert, CmsError>
+    match x509cert.parse(der, asn1read.default_limits())
+        Err(e) => Err(CmsBadKey("the certificate: ${e.message()}"))
+        Ok(c)  => Ok(c)
+
+// Whether a certificate is the one a SignerInfo names.
+fn names(s: CmsSigner, der: Bytes) -> Bool
+    match cert_of(der)
+        Err(_) => false
+        Ok(c)  =>
+            if bytes.len(s.ski) > 0
+                match x509ext.subject_key_identifier(c.extensions, asn1read.default_limits())
+                    Err(_)     => false
+                    Ok(wanted) =>
+                        match wanted
+                            None     => false
+                            Some(id) => bytes.to_hex(id) == bytes.to_hex(s.ski)
+            else
+                let name = bytes.slice(der, c.issuer.span.off, c.issuer.span.off + c.issuer.span.len)
+                bytes.to_hex(name) == bytes.to_hex(s.issuer) and trim_zeros(c.serial) == trim_zeros(s.serial)
+
+// The certificate the message carries for signer `i`, or `None`.
+pub fn find_certificate(sd: CmsSigned, i: Int) -> ?Bytes []
+    if i < 0 or i >= list.len(sd.signers)
+        return None
+    for der in sd.certs
+        if names(sd.signers[i], der)
+            return Some(bytes.clone(der))
+    None
+
+// ── verifying ────────────────────────────────────────────────────────
+
+fn attr_value(s: CmsSigner, oid: Str) -> Result<DerNode, CmsError>
+    var found: [Bytes] = []
+    for a in s.attrs
+        if a.oid == oid
+            if list.len(found) > 0 or list.len(a.values) != 1
+                return Err(CmsBadAttribute("${oid} appears once with one value"))
+            found = a.values[:]
+    if list.len(found) == 0
+        return Err(CmsBadAttribute("${oid} is required"))
+    cmsder.root(found[0])
+
+// The signing time attribute as the text of its value (`YYMMDDHHMMSSZ` for
+// a UTCTime), or `None` when the signer has none.
+pub fn signing_time(sd: CmsSigned, i: Int) -> Result<?Str, CmsError> []
+    if i < 0 or i >= list.len(sd.signers)
+        return Err(CmsNoMatch("signer ${i}"))
+    for a in sd.signers[i].attrs
+        if a.oid == OID_SIGNING_TIME
+            let v = attr_value(sd.signers[i], OID_SIGNING_TIME)!
+            return Ok(Some(bytes.to_str(cmsder.content(v))))
+    Ok(None)
+
+// What the signature covers.
+fn signed_bytes(sd: CmsSigned, s: CmsSigner, content: Bytes) -> Result<Bytes, CmsError>
+    match s.attrs_raw
+        None      => Ok(bytes.clone(content))
+        Some(raw) =>
+            let want = cmscrypto.digest_of(s.digest_alg, content)!
+            let got = cmsder.octets(attr_value(s, OID_MESSAGE_DIGEST)!)!
+            if not digest.ct_eq(want, got)
+                return Err(CmsAuthFailed)
+            let ct = cmsder.oid_text(attr_value(s, OID_CONTENT_TYPE)!)!
+            if ct != sd.content_type
+                return Err(CmsBadAttribute("the content type attribute is ${ct}, the content is ${sd.content_type}"))
+            Ok(bytes.concat([bytes.u8(49), bytes.slice(raw, 1, bytes.len(raw))]))
+
+fn rsa_hash(alg: Str) -> Result<RsaHash, CmsError>
+    if alg == OID_SHA256
+        return Ok(RsaHash.Sha256)
+    if alg == OID_SHA384
+        return Ok(RsaHash.Sha384)
+    Err(CmsNotImplemented("RSA with the digest ${alg}: rsa-nv verifies SHA-256 and SHA-384"))
+
+fn rsa_key(spki: AsnSubjectPublicKeyInfo) -> Result<RsaPublicKey, CmsError>
+    if asn1oid.oid_text(spki.algorithm.algorithm) != OID_RSA_ENCRYPTION
+        return Err(CmsBadKey("the certificate's key is not an RSA key"))
+    let top = cmsder.root(spki.public_key.data)!
+    let kids = cmsder.children(top)!
+    let n = cmsder.content(cmsder.member(kids, 0, "the modulus")!)
+    let e = cmsder.content(cmsder.member(kids, 1, "the exponent")!)
+    match rsa.public_key_from_bytes(n, e)
+        Err(err) => Err(CmsBadKey(err.message()))
+        Ok(k)    => Ok(k)
+
+// The parameters of RSASSA-PSS (RFC 4056 section 3.1): the hash, and the
+// salt length with its default of 20.  The mask generation function must be
+// MGF1 with the same hash.
+fn pss_params(s: CmsSigner) -> Result<RsaHash, CmsError>
+    match s.sig_params
+        None    => Err(CmsNotImplemented("RSASSA-PSS with the default SHA-1 parameters"))
+        Some(p) =>
+            var hash_oid = OID_SHA1
+            var mgf_hash = OID_SHA1
+            var salt = 20
+            for k in cmsder.children(p)!
+                if cmsder.is_context(k, 0)
+                    hash_oid = cmsder.alg_of(cmsder.member(cmsder.children(k)!, 0, "the PSS hash")!)!.oid
+                if cmsder.is_context(k, 1)
+                    let m = cmsder.alg_of(cmsder.member(cmsder.children(k)!, 0, "the mask generation function")!)!
+                    match m.params
+                        None     => return Err(CmsMalformed("the MGF1 parameters"))
+                        Some(mp) => mgf_hash = cmsder.alg_of(mp)!.oid
+                if cmsder.is_context(k, 2)
+                    salt = cmsder.int_value(cmsder.member(cmsder.children(k)!, 0, "the salt length")!)!
+            let h = rsa_hash(hash_oid)!
+            if mgf_hash != hash_oid
+                return Err(CmsNotImplemented("RSASSA-PSS with a mask hash other than the message hash"))
+            if salt != rsa.digest_bytes(h)
+                return Err(CmsNotImplemented("RSASSA-PSS with a salt length other than the hash length"))
+            Ok(h)
+
+fn verify_rsa(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Result<Unit, CmsError>
+    let key = rsa_key(spki)!
+    var good = false
+    if s.sig_alg == OID_RSASSA_PSS
+        let h = pss_params(s)!
+        good = rsa.verify_pss(key, h, input, s.signature, rsa.digest_bytes(h))
+    else
+        let h = rsa_hash(s.digest_alg)!
+        good = rsa.verify_pkcs1(key, h, input, s.signature)
+    if good
+        Ok(())
+    else
+        Err(CmsAuthFailed)
+
+fn verify_ecdsa(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Result<Unit, CmsError>
+    match asn1pkix.ec_public_key_xy(spki)
+        Err(e) => Err(CmsBadKey(e.message()))
+        Ok(pt) =>
+            match asn1pkix.ecdsa_signature_rs(s.signature, 32, asn1read.default_limits())
+                Err(_)  => Err(CmsAuthFailed)
+                Ok(rs)  =>
+                    let h = cmscrypto.digest_of(s.digest_alg, input)!
+                    let leftmost = bytes.slice(h, 0, 32)
+                    if bytes.len(h) < 32
+                        return Err(CmsNotImplemented("ECDSA with a digest shorter than 256 bits"))
+                    match p256.public_key_from_bytes(bytes.to_byte_list(pt.x), bytes.to_byte_list(pt.y))
+                        Err(_) => Err(CmsBadKey("the public key is not a P-256 point"))
+                        Ok(pk) =>
+                            match p256.ecdsa_verify(pk, bytes.to_byte_list(leftmost), bytes.to_byte_list(bytes.concat([rs.r, rs.s])))
+                                Err(_)   => Err(CmsBadKey("the public key is not a point of P-256"))
+                                Ok(good) =>
+                                    if good
+                                        Ok(())
+                                    else
+                                        Err(CmsAuthFailed)
+
+fn verify_ed25519(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Result<Unit, CmsError>
+    if bytes.len(s.signature) != 64
+        return Err(CmsAuthFailed)
+    match asn1pkix.ed25519_public_key(spki)
+        Err(e) => Err(CmsBadKey(e.message()))
+        Ok(pub_bytes) =>
+            match ed25519.verifying_key_from_bytes(bytes.to_byte_list(pub_bytes))
+                // cov: skip — the key is 32 bytes by `ed25519_public_key`, the only length the constructor refuses
+                Err(_) => Err(CmsBadKey("the public key is not an Ed25519 key"))
+                Ok(vk) =>
+                    match ed25519.validate(vk, EdStrict)
+                        Some(_) => Err(CmsBadKey("the public key is not an acceptable Ed25519 key"))
+                        None    =>
+                            match ed25519.signature_from_bytes(bytes.to_byte_list(s.signature))
+                                // cov: skip — the signature is 64 bytes by the check above, the only length the constructor refuses
+                                Err(_)  => Err(CmsAuthFailed)
+                                Ok(sig) =>
+                                    match ed25519.verify(vk, bytes.to_byte_list(input), sig, EdStrict)
+                                        Err(_)   => Err(CmsAuthFailed)
+                                        Ok(good) =>
+                                            if good
+                                                Ok(())
+                                            else
+                                                Err(CmsAuthFailed)
+
+fn is_rsa_alg(a: Str) -> Bool
+    a == OID_RSA_ENCRYPTION or a == OID_SHA1_WITH_RSA or a == OID_SHA256_WITH_RSA or a == OID_SHA384_WITH_RSA or a == OID_SHA512_WITH_RSA or a == OID_RSASSA_PSS
+
+fn is_ecdsa_alg(a: Str) -> Bool
+    a == OID_EC_PUBLIC_KEY or a == OID_ECDSA_SHA256 or a == OID_ECDSA_SHA384
+
+// The content a SignerInfo covers: the encapsulated content, or the
+// detached one the caller supplies.
+fn content_for(sd: CmsSigned, detached: ?Bytes) -> Result<Bytes, CmsError>
+    match sd.content
+        Some(c) =>
+            if detached != None
+                return Err(CmsDetachedConflict)
+            Ok(bytes.clone(c))
+        None    =>
+            match detached
+                None    => Err(CmsNoContent)
+                Some(x) => Ok(bytes.clone(x))
+
+// Check signer `i` against the DER certificate `cert` and answer the
+// content.  The certificate is the caller's choice: `find_certificate`
+// picks the included one a SignerInfo names, and a chain to a trust anchor
+// is the caller's to build.
+pub fn verify(sd: CmsSigned, i: Int, cert: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+    if i < 0 or i >= list.len(sd.signers)
+        return Err(CmsNoMatch("signer ${i} of ${list.len(sd.signers)}"))
+    let s = sd.signers[i]
+    let content = content_for(sd, detached)!
+    let input = signed_bytes(sd, s, content)!
+    let c = cert_of(cert)!
+    let spki = c.public_key
+    if is_rsa_alg(s.sig_alg)
+        verify_rsa(s, spki, input)!
+        return Ok(content)
+    if is_ecdsa_alg(s.sig_alg)
+        verify_ecdsa(s, spki, input)!
+        return Ok(content)
+    if s.sig_alg == OID_ED25519
+        verify_ed25519(s, spki, input)!
+        return Ok(content)
+    Err(CmsUnsupportedAlg(s.sig_alg))
+
+// Check signer `i` against the certificate the message carries for it.
+pub fn verify_embedded(sd: CmsSigned, i: Int, detached: ?Bytes) -> Result<Bytes, CmsError> []
+    match find_certificate(sd, i)
+        None       => Err(CmsNoMatch("a certificate in the message for signer ${i}"))
+        Some(cert) => verify(sd, i, cert, detached)
+
+// ── writing ──────────────────────────────────────────────────────────
+
+// A signer to sign with: its certificate, a key of this package's two
+// signing schemes, and the choices of the SignerInfo.
+pub struct CmsSignerSpec
+    // The certificate as DER; it is included in the message.
+    cert: Bytes
+    // 0 for Ed25519 (digest SHA-512, RFC 8419), 1 for ECDSA on P-256
+    // (digest SHA-256, RFC 5753).
+    scheme: Int
+    // The 32-byte seed of an Ed25519 key or the 32-byte scalar of a P-256
+    // key.
+    secret: Bytes
+    // Name the certificate by its subject key identifier (SignerInfo version
+    // 3) and not by issuer and serial number (version 1).
+    by_ski: Bool
+    // The signing time in Unix seconds, or a negative number for none.
+    signing_time: Int
+    // Whether to sign the signed attributes.  Without them the signature
+    // covers the content itself.
+    attributes: Bool
+
+fn digest_for(scheme: Int) -> Str
+    if scheme == 0
+        OID_SHA512
+    else
+        OID_SHA256
+
+fn sign_ed25519(secret: Bytes, input: Bytes) -> Result<Bytes, CmsError>
+    match ed25519.signing_key_from_seed(bytes.to_byte_list(secret))
+        Err(_) => Err(CmsBadKey("the Ed25519 seed is 32 bytes"))
+        Ok(sk) => Ok(bytes.from_byte_list(ed25519.signature_bytes(ed25519.sign(sk, bytes.to_byte_list(input)))))
+
+fn sign_ecdsa(secret: Bytes, input: Bytes) -> Result<Bytes, CmsError>
+    match p256.secret_key_from_bytes(bytes.to_byte_list(secret))
+        Err(_) => Err(CmsBadKey("the P-256 scalar is 32 bytes and not zero"))
+        Ok(sk) =>
+            match p256.ecdsa_sign(sk, bytes.to_byte_list(hashing.sha256(input)))
+                // cov: skip — the digest is 32 bytes, the only length `ecdsa_sign` refuses
+                Err(_)  => Err(CmsBadKey("the P-256 scalar is 32 bytes and not zero"))
+                Ok(sig) =>
+                    let raw = bytes.from_byte_list(sig)
+                    Ok(cmsder.seq([cmsder.int_bytes(bytes.slice(raw, 0, 32)), cmsder.int_bytes(bytes.slice(raw, 32, 64))]))
+
+fn attribute(oid: Str, value: Bytes) -> Result<Bytes, CmsError>
+    Ok(cmsder.seq([cmsder.oid(oid)!, cmsder.set_of([value])]))
+
+fn signer_write(sp: CmsSignerSpec, content_type: Str, content: Bytes) -> Result<Bytes, CmsError>
+    if sp.scheme != 0 and sp.scheme != 1
+        return Err(CmsNotImplemented("signing with RSA: rsa-nv verifies RSA signatures and does not make them"))
+    let c = cert_of(sp.cert)!
+    var sid = bytes.zeros(0)
+    var version = 1
+    if sp.by_ski
+        match x509ext.subject_key_identifier(c.extensions, asn1read.default_limits())
+            Err(e)  => return Err(CmsBadKey(e.message()))
+            Ok(ski) =>
+                match ski
+                    None     => return Err(CmsBadKey("the certificate has no subject key identifier"))
+                    Some(id) => sid = cmsder.ctx_prim(0, id)
+        version = 3
+    else
+        let name = bytes.slice(sp.cert, c.issuer.span.off, c.issuer.span.off + c.issuer.span.len)
+        sid = cmsder.seq([name, cmsder.tlv(2, c.serial)])
+    let dalg = digest_for(sp.scheme)
+    let salg = if sp.scheme == 0 then OID_ED25519 else OID_ECDSA_SHA256
+    var parts: [Bytes] = [cmsder.int_u(version), sid, cmsder.alg_id(dalg, None)!]
+    var input = bytes.clone(content)
+    if sp.attributes
+        var attrs: [Bytes] = [attribute(OID_CONTENT_TYPE, cmsder.oid(content_type)!)!,
+                              attribute(OID_MESSAGE_DIGEST, cmsder.oct(cmscrypto.digest_of(dalg, content)!))!]
+        if sp.signing_time >= 0
+            list.push(attrs, attribute(OID_SIGNING_TIME, cmsder.utc_time(sp.signing_time))!)
+        let as_set = cmsder.set_of(attrs)
+        input = bytes.clone(as_set)
+        list.push(parts, bytes.concat([bytes.u8(160), bytes.slice(as_set, 1, bytes.len(as_set))]))
+    list.push(parts, cmsder.alg_id(salg, None)!)
+    var sig = bytes.zeros(0)
+    if sp.scheme == 0
+        sig = sign_ed25519(sp.secret, input)!
+    else
+        sig = sign_ecdsa(sp.secret, input)!
+    list.push(parts, cmsder.oct(sig))
+    Ok(cmsder.seq(parts))
+
+// A ContentInfo of type signed-data over `content` (content type data),
+// signed by each signer, with their certificates included, and the content
+// encapsulated unless `detach`.
+pub fn sign(content: Bytes, detach: Bool, signers: [CmsSignerSpec]) -> Result<Bytes, CmsError> []
+    if list.len(signers) == 0
+        return Err(CmsMalformed("a signed message has at least one signer"))
+    var infos: [Bytes] = []
+    var algs: [Bytes] = []
+    var certs: [Bytes] = []
+    var version = 1
+    for sp in signers
+        let si = signer_write(sp, OID_DATA, content)!
+        list.push(infos, bytes.clone(si))
+        list.push(algs, cmsder.alg_id(digest_for(sp.scheme), None)!)
+        list.push(certs, bytes.clone(sp.cert))
+        if sp.by_ski
+            version = 3
+    var eci = cmsder.seq([cmsder.oid(OID_DATA)!])
+    if not detach
+        eci = cmsder.seq([cmsder.oid(OID_DATA)!, cmsder.ctx(0, cmsder.oct(content))])
+    let body = cmsder.seq([cmsder.int_u(version), cmsder.set_of(algs), eci,
+                           cmsder.ctx(0, bytes.concat(certs)), cmsder.set_of(infos)])
+    cmsinfo.write(OID_SIGNED_DATA, body)
+
+// The degenerate SignedData that carries certificates only (the PKCS #7
+// certificate bag): no content, no digest algorithms and no signers.
+pub fn certs_only_write(certs: [Bytes]) -> Result<Bytes, CmsError> []
+    if list.len(certs) == 0
+        return Err(CmsMalformed("a certificate bag holds at least one certificate"))
+    let body = cmsder.seq([cmsder.int_u(1), cmsder.set_of([]), cmsder.seq([cmsder.oid(OID_DATA)!]),
+                           cmsder.ctx(0, bytes.concat(certs)), cmsder.set_of([])])
+    cmsinfo.write(OID_SIGNED_DATA, body)

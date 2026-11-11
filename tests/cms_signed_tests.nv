@@ -1,0 +1,367 @@
+// cms_signed_tests.nv — SignedData: reading, verifying and signing.
+//
+// The OpenSSL messages were made once with OpenSSL 3.0.13 from a 2048-bit
+// RSA key, a P-256 key and an Ed25519 key, each in a self-signed
+// certificate (tests/generate/gen_cms_vectors.sh has the commands), and are
+// checked in as hex.  The messages are signed over the S/MIME-canonical text
+// "Hello, CMS world.", so the content ends in CRLF.  OpenSSL 3.0 cannot make
+// or check a CMS signature with an Ed25519 key; the Ed25519 messages are
+// made by this package and the algorithm is checked by ed25519-nv's own
+// vectors.  RFC 8419 contains no example bytes.
+
+use std.test
+use std.bytes
+use std.list
+use cmserr
+use cmsoid
+use cmsder
+use cmsinfo
+use cmssigned
+
+fn said<T>(r: Result<T, CmsError>) -> Str
+    match r
+        Ok(_)  => "ok"
+        Err(e) => e.message()
+
+fn h(s: Str) -> Bytes
+    bytes.from_hex(s) ?? bytes.zeros(0)
+
+fn hex(b: Bytes) -> Str
+    bytes.to_hex(b)
+
+fn text_of(r: Result<Bytes, CmsError>) -> Str
+    match r
+        Ok(b)  => bytes.to_str(b)
+        Err(e) => e.message()
+
+fn must(r: Result<Bytes, CmsError>) -> Bytes
+    match r
+        Ok(b)  => bytes.clone(b)
+        Err(e) =>
+            test.fail(e.message())
+            bytes.zeros(0)
+
+fn signed_of(b: Bytes) -> CmsSigned
+    match cmssigned.read(b)
+        Ok(s)  => s
+        Err(e) =>
+            test.fail(e.message())
+            CmsSigned { version: 0, digest_algs: [], content_type: "", content: None, certs: [], crls: [], signers: [] }
+
+fn spec(cert: Str, scheme: Int, secret: Str, by_ski: Bool, time: Int, attrs: Bool) -> CmsSignerSpec
+    CmsSignerSpec { cert: h(cert), scheme: scheme, secret: h(secret), by_ski: by_ski, signing_time: time, attributes: attrs }
+
+fn content() -> Str
+    "Hello, CMS world.\r\n"
+
+fn rsa_pkcs1() -> Str
+    "308205ae06092a864886f70d010702a082059f3082059b020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082031b30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd30429318202423082023e0201013032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353831305a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300d06092a864886f70d010101050004820100b7a9d076a59d34642aa7a775a9e01f138af3c8c30b863b0c71d9928d52b124c618169d478bacf7e8efcfe3014c3416c2a5396e21a48e2ffc345e6e188b819fab2acb212f1dd69d45ce767a2c19484bcf6f85467e0ee8e2c36fba1541cce15f74af22b6fd2d355c7f3218e690836e748ea78fef5b003b949af2097225dc2b389a98cbeadc8a64eaa815fbf47ef682950c03d4631c2b5fe3f781ea9fb018e6fc6e3c863531f21fb1a991d2d438a228cc914ccc319f3b92578f025a495e547a5d507dcc948ea4163928928d5cf4fdaf9fcd801c79b37e97cd370cee12bedaf15174e737dd3529329b5f8409aa065a68178bbe7204c245a334bb4ca1f32512c483e8"
+
+fn rsa_pss() -> Str
+    "308205e206092a864886f70d010702a08205d3308205cf020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082031b30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd3042931820276308202720201013032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353832355a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128304106092a864886f70d01010a3034a00f300d06096086480165030402010500a11c301a06092a864886f70d010108300d06096086480165030402010500a20302012004820100bf684695cc139a3577a7977f4d02fa9e10d55d6b809075d81a42aae6bc545eed149249e691c837008b847135d31b7538d0496e4aa75ba0e47d7cdc68e40bb3061bc3f8ff2afcd40c74e6839954e957928c913bbb214256dc0502a84ee586151a0b576443fd5d45040e8fd42f282add702eaa15eee35adf4eed94e70ddf99eeca3224f7a261ec4b697d0dd83aad12f7e4564de27f2c054f42481cb86f53249e139920e5d1efed639d19d99b1af3d49bd2b01f56ca213d8a3e4f4002884f9bf01f88383ebe1b34bc1286e371b3988ffed5503c4d212a186bd8cee4b62d0c651e9a2b401ffc9a4a38340c1e33f7dd427fbbdfaf19a35de75057391905fad8b9eca8"
+
+fn ec() -> Str
+    "3082036206092a864886f70d010702a08203533082034f020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082018d308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e553182018430820180020101303130193117301506035504030c0e636d732d6e76206563207465737402146a35613cf1100f844a551d5858091de8125c8106300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353831305a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300a06082a8648ce3d04030204483046022100883d42c8698b1cd56ec19491c424818a4a58f5a087067573282f06e4622751e3022100afef0eea1792239503e5bc792cd10e2bdeae5cdd32ba2b222ffc9a6034959013"
+
+fn ec_detached() -> Str
+    "3082034a06092a864886f70d010702a082033b30820337020101310d300b0609608648016503040201300b06092a864886f70d010701a082018d308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e55318201833082017f020101303130193117301506035504030c0e636d732d6e76206563207465737402146a35613cf1100f844a551d5858091de8125c8106300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313039303431325a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300a06082a8648ce3d04030204473045022100d78f5b10f655e05b9ca037e94435e9ba20f2802702b3b47679a988f4e1927aa6022037634aa76e0c14d849bf6327a6d7f7927ff0f638ec2965cf3223d952f394bafb"
+
+fn certs_only() -> Str
+    "308204d306092a864886f70d010702a08204c4308204c00201013100300b06092a864886f70d010701a08204a8308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e5530820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd304293100"
+
+fn kek128() -> Str
+    "308201ea06092a864886f70d010703a08201db308201d7020102318201823082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d0101010500048201000e8884c933280d7d7673ffbcd44a7ac6d6df551c2490dbfa0d194eb5b3d017d2d9c902cf3e0652e12a319343a51dff78ce93f70981e840f4d10dd23f901ffa3299c9c441cf2c21f858343bf0540caeceb659d2808b21ec20e7ba10ac27615c79b08f5e69261244da3b875ddc8e2cbd960e376c63944160e0926130664be76d268ea2ae4a1055eba2fa02c522e4bbb4a8aa29a49a8b19ff9c97b048c74eed4b92b52ccfcbbb465ea71375db8fa9eb490d044f78593337aaed3faedf63a58768731cbf9ba9d17bf947db3949080e0917e90c95604de9a4fd04d23a6602979b20e5ef6cca77b46a39b25407bb3cfb06c271c189b2e1e4cae435bc0dfc07ca7d6543a232020104300604044b4b4b4b300b06096086480165030401050418192b4eecc432bb10fccc128dd9ccfb5a3a102618f17a45a6304c06092a864886f70d010701301d06096086480165030401020410a1ad38d33f0bb44bbc3ffbf69450ed4e8020ea095016f29bce2e125f2cb50623a0e0724d722412faa909428982f4295055a0"
+
+fn pwri() -> Str
+    "3082022806092a864886f70d010703a082021930820215020103318201c03082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d010101050004820100c3ac4fd52c7b8c91c5bb2036976ef0b88ecdc69f9c07f48e1e7809163010df6e62e20d055454ff93dd245f39830e92d381e6e55c2944b1882b8f7840aafd0a9fe612065fb944792aa3e964a4b567ed06ad1275f004deb4e7e1a5e1874a83d3e1721abcad87ae86221d783b855605efbcc5bfc94b5dfc8b343075edfdc9f7849869d8244eccf043a8bd27bfcfa696a4c48bccc328836796c8a48e0d697af220c6c637d399c68d5e9e5b201ec43aa8fb35ca8c9de532c267a048134a668872e4b0e3a8d139172c730f287b1876bedfa6a9f60f6fe79ca6c4be4b892b4f87abed9c8926856df6c2d1c4197d3391b06c39abce0cf4c909ea0e8e056ad01e41882b99a370020100a01b06092a864886f70d01050c300e04085f4c34785761693402020800302c060b2a864886f70d0109100309301d060960864801650304010204105184a37877eed9e274d757c0aba555de04203cbc6712dbf4ade38f6ae290c8e042fcf8c1504538f775cdfd2e734bd88df998304c06092a864886f70d010701301d06096086480165030401020410523e2d6850508496f53455a59adf62d48020528129727f071029e6f1d8127b9f9294561b7211ab5001b7baccb99d1890997d"
+
+fn authenv() -> Str
+    "308201f0060b2a864886f70d0109100117a08201df308201db020100318201803082014a0201003032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010105000482010072dd056e3659166f6a71e2fa2f410378a418029c642752aac62631d11012cee840e79d4a9122b2a7df4f928f3d78a18c663f93b5c670f995c9b11fac695da08f8d506dbaef3df158172c75b95c996bb6587523ae84537c436d1be78b8a50bc2549d6f2831a9c899b719cd58739a956dacfc25a0ad7c592c81ce3d5d5a8604b4ea91b85ebc719f0809ec0e0342fd388988fc43d61f31f6c96b62202c393bcc51a2b69539625191a578dfe843695e8f4b135513dcdd3c1340ebcb22a2e8f0b7c868659ebf4d4bf5c019bd39e1574d7bd1b74a9c09258c73df527949fad52414fece2bdc1d598f467b07909fed06fd52796fcda9598bbc2cc83506296a9c14333aca230020104300404024b4b300b0609608648016503040105041816cb4c8f556ce18b3f8e89847ca4a0f33a442c304266cae8304006092a864886f70d010701301e06096086480165030401063011040cb4748767cae94761b9fd2bd502011080138bce45da359a360442d0d40ea2e00dca0202bc0410e7bcd4555ee371df01259100eab805e8"
+
+fn encdata() -> Str
+    "306006092a864886f70d010706a0533051020100304c06092a864886f70d010701301d060960864801650304012a041088a5713cdbdb2b15afa25b35a2101aaf8020f8ae00f2c2e07aec983ebb7da869756ae7072ca56d0577bfca1ddf6f12b5cac0"
+
+fn digested() -> Str
+    "306506092a864886f70d010705a0583056020100300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0a04206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b"
+
+fn cert_rsa() -> Str
+    "30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd30429"
+
+fn cert_ec() -> Str
+    "308201893082012fa00302010202146a35613cf1100f844a551d5858091de8125c8106300a06082a8648ce3d04030230193117301506035504030c0e636d732d6e7620656320746573743020170d3236313131313038353831305a180f32313236313031383038353831305a30193117301506035504030c0e636d732d6e7620656320746573743059301306072a8648ce3d020106082a8648ce3d03010703420004572e9238470c66a216ac0e3162c59f5dbb2b4de4632f4f37c5490ebebfb5cb60e1aa3f7f826ecf8ce3a298ea38c611749c5dff7b3a7705d9bf3622cf6d11635da3533051301d0603551d0e041604143917b027f008ae25cef197b741e628dd9b7f7db7301f0603551d230418301680143917b027f008ae25cef197b741e628dd9b7f7db7300f0603551d130101ff040530030101ff300a06082a8648ce3d040302034800304502207d70e951bb88e7262349dd3bd76661db1430c13b29b98b4307ec73a93c0688e0022100a3090ac21986e33c2853b3c814cf34824fe74de548ef97964ee5440dec737e55"
+fn cert_ed() -> Str
+    "3082015330820105a00302010202141807df04f9d9ed18325f0a5a04d4ce97217182b1300506032b6570301e311c301a06035504030c13636d732d6e76206564323535313920746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301e311c301a06035504030c13636d732d6e7620656432353531392074657374302a300506032b657003210005b563254de259769414d0504d1a290040ef2aaf9e2c62c192655fbbf581bf3ca3533051301d0603551d0e0416041448249f86f3c2ac636f3b61826f0ce0de820955bf301f0603551d2304183016801448249f86f3c2ac636f3b61826f0ce0de820955bf300f0603551d130101ff040530030101ff300506032b6570034100d6930ea02c30a7144f7a78e1e33eab6ea83c34e9199d1e8d8b29e4ab69ca589ff66d577cff1239f8bdf596bbdc224ff8ca67f6cc6fc2a3ffd1095e89a6129a0c"
+fn ec_scalar() -> Str
+    "32383af9d7c4b0f918a2c374bbbc277d537a383d959b9135070382d7bfb15230"
+
+fn ed_seed() -> Str
+    "1b1089dca503a0dedbfdc5bc743c65fd7e4daedff61dbf06ffdff20daef0b675"
+
+@test
+fn test_openssl_rsa_pkcs1_v1_5_with_sha256() [io]
+    let sd = signed_of(h(rsa_pkcs1()))
+    test.assert_eq(sd.version, 1)
+    test.assert_eq_str(sd.content_type, OID_DATA)
+    test.assert_eq(list.len(sd.digest_algs), 1)
+    test.assert_eq_str(sd.digest_algs[0], OID_SHA256)
+    test.assert_eq(list.len(sd.certs), 1)
+    test.assert_eq(list.len(sd.signers), 1)
+    let s = sd.signers[0]
+    test.assert_eq(s.version, 1)
+    test.assert_eq_str(s.sig_alg, OID_RSA_ENCRYPTION)
+    test.assert_eq(bytes.len(s.signature), 256)
+    test.assert_eq(s.attrs_raw == None, false)
+    test.assert_eq(cmssigned.is_certs_only(sd), false)
+    test.case("the included certificate is the one the signer names")
+    match cmssigned.find_certificate(sd, 0)
+        None    => test.fail("no certificate found")
+        Some(c) => test.assert_eq_str(hex(c), cert_rsa())
+    test.case("the signature, the message digest and the content type verify")
+    test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), content())
+    test.assert_eq_str(text_of(cmssigned.verify(sd, 0, h(cert_rsa()), None)), content())
+    test.assert_eq_str(said(cmssigned.signing_time(sd, 0)), "ok")
+    match cmssigned.signing_time(sd, 0)
+        Ok(t)  => test.assert_eq(t == None, false)
+        Err(e) => test.fail(e.message())
+    test.case("another certificate does not verify it")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_ec()), None)), "cms: unusable key: the certificate's key is not an RSA key")
+
+@test
+fn test_openssl_rsa_pss_with_sha256() [io]
+    let sd = signed_of(h(rsa_pss()))
+    test.assert_eq_str(sd.signers[0].sig_alg, OID_RSASSA_PSS)
+    test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), content())
+    test.case("the PSS parameters are checked: the hash, the mask hash and the salt length")
+    let s = sd.signers[0]
+    let none = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                           attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: None, signature: s.signature }
+    test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [none] }, 0, h(cert_rsa()), None)),
+        "cms: not implemented: RSASSA-PSS with the default SHA-1 parameters")
+    let sha1_params = cmsder.root(must(cmsder.alg_id(OID_RSASSA_PSS, None)) + h(""))
+    test.assert_eq_str(said(sha1_params), "ok")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA1, OID_SHA1, 20))))),
+        "cms: not implemented: RSA with the digest 1.3.14.3.2.26: rsa-nv verifies SHA-256 and SHA-384")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA256, OID_SHA384, 32))))),
+        "cms: not implemented: RSASSA-PSS with a mask hash other than the message hash")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA256, OID_SHA256, 20))))),
+        "cms: not implemented: RSASSA-PSS with a salt length other than the hash length")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA256, OID_SHA256, 32))))), "ok")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA384, OID_SHA384, 48))))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(pss_with(sd, "3004a1020500")), "cms: malformed structure: a primitive value has no members")
+
+fn pss_params(hash_oid: Str, mgf_hash: Str, salt: Int) -> Result<Bytes, CmsError>
+    let hash_alg = cmsder.alg_id(hash_oid, None)!
+    let inner = cmsder.alg_id(mgf_hash, None)!
+    let mgf = cmsder.alg_id(OID_MGF1, Some(inner))!
+    Ok(cmsder.seq([cmsder.ctx(0, hash_alg), cmsder.ctx(1, mgf), cmsder.ctx(2, cmsder.int_u(salt))]))
+
+// The message with the PSS parameters of its signer replaced.
+fn pss_with(sd: CmsSigned, params_hex: Str) -> Result<Bytes, CmsError>
+    let s = sd.signers[0]
+    let node = cmsder.root(h(params_hex))!
+    let changed = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                              attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: Some(node), signature: s.signature }
+    cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
+                                 certs: sd.certs, crls: sd.crls, signers: [changed] }, 0, h(cert_rsa()), None)
+
+@test
+fn test_openssl_ecdsa_p256_with_sha256() [io]
+    let sd = signed_of(h(ec()))
+    test.assert_eq_str(sd.signers[0].sig_alg, OID_ECDSA_SHA256)
+    test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), content())
+    match cmssigned.find_certificate(sd, 0)
+        None    => test.fail("no certificate found")
+        Some(c) => test.assert_eq_str(hex(c), cert_ec())
+    test.case("a changed signature byte, or a changed digest in the attributes, does not verify")
+    let s = sd.signers[0]
+    var sig = bytes.clone(s.signature)
+    bytes.set_u8(sig, 40, (bytes.byte_at(sig, 40) ?? 0) ^ 1)
+    let bad = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                          attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: s.sig_params, signature: sig }
+    let m = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
+                        certs: sd.certs, crls: sd.crls, signers: [bad] }
+    test.assert_eq_str(said(cmssigned.verify(m, 0, h(cert_ec()), None)), "cms: the signature, digest or tag did not verify")
+    let other = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+                            content: Some(bytes.from_str("another text")), certs: sd.certs, crls: sd.crls, signers: sd.signers }
+    test.assert_eq_str(said(cmssigned.verify(other, 0, h(cert_ec()), None)), "cms: the signature, digest or tag did not verify")
+    test.case("a signature that is not a DER SEQUENCE of two integers")
+    let garbage = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                              attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: s.sig_params, signature: h("0102") }
+    test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [garbage] }, 0, h(cert_ec()), None)),
+        "cms: the signature, digest or tag did not verify")
+
+@test
+fn test_openssl_detached_signature_and_the_certificate_bag() [io]
+    let sd = signed_of(h(ec_detached()))
+    test.assert_eq(sd.content == None, true)
+    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, None)), "cms: the message has detached content and none was supplied")
+    test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, Some(bytes.from_str(content())))), content())
+    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, Some(bytes.from_str("other")))), "cms: the signature, digest or tag did not verify")
+    let full = signed_of(h(ec()))
+    test.assert_eq_str(said(cmssigned.verify_embedded(full, 0, Some(bytes.from_str(content())))),
+        "cms: content was supplied for a message that carries its own")
+    test.case("the PKCS #7 certificate bag: two certificates, no signer")
+    let bag = signed_of(h(certs_only()))
+    test.assert_eq(cmssigned.is_certs_only(bag), true)
+    test.assert_eq(list.len(bag.certs), 2)
+    test.assert_eq_str(hex(bag.certs[0]), cert_ec())
+    test.assert_eq_str(hex(bag.certs[1]), cert_rsa())
+    test.assert_eq(list.len(bag.signers), 0)
+    match cmssigned.certs_only_write([h(cert_ec()), h(cert_rsa())])
+        Ok(b)  => test.assert_eq_str(hex(b), certs_only())
+        Err(e) => test.fail(e.message())
+    test.assert_eq_str(said(cmssigned.certs_only_write([])), "cms: malformed structure: a certificate bag holds at least one certificate")
+    test.assert_eq_str(said(cmssigned.verify_embedded(bag, 0, None)), "cms: no match: a certificate in the message for signer 0")
+    test.assert_eq_str(said(cmssigned.verify(bag, 0, h(cert_ec()), None)), "cms: no match: signer 0 of 0")
+    test.assert_eq_str(said(cmssigned.signing_time(bag, 0)), "cms: no match: signer 0")
+    test.assert_eq(cmssigned.find_certificate(bag, 0) == None, true)
+    test.assert_eq(cmssigned.is_certs_only(full), false)
+
+@test
+fn test_signing_with_ecdsa_and_ed25519() [io]
+    let msg = bytes.from_str("signed here")
+    test.case("ECDSA on P-256: issuer and serial, with a signing time")
+    match cmssigned.sign(msg, false, [spec(cert_ec(), 1, ec_scalar(), false, 1792000000, true)])
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            let sd = signed_of(b)
+            test.assert_eq(sd.version, 1)
+            test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), "signed here")
+            match cmssigned.signing_time(sd, 0)
+                Ok(t)  => test.assert_eq_str(t ?? "none", "261014174640Z")
+                Err(e) => test.fail(e.message())
+    test.case("Ed25519 with SHA-512, by subject key identifier, no signing time")
+    match cmssigned.sign(msg, false, [spec(cert_ed(), 0, ed_seed(), true, 0 - 1, true)])
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            let sd = signed_of(b)
+            test.assert_eq(sd.version, 3)
+            test.assert_eq(sd.signers[0].version, 3)
+            test.assert_eq_str(sd.digest_algs[0], OID_SHA512)
+            test.assert_eq_str(sd.signers[0].sig_alg, OID_ED25519)
+            test.assert_eq(bytes.len(sd.signers[0].signature), 64)
+            test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), "signed here")
+            match cmssigned.signing_time(sd, 0)
+                Ok(t)  => test.assert_eq(t == None, true)
+                Err(e) => test.fail(e.message())
+    test.case("without signed attributes the signature covers the content")
+    match cmssigned.sign(msg, false, [spec(cert_ed(), 0, ed_seed(), false, 0 - 1, false)])
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            let sd = signed_of(b)
+            test.assert_eq(sd.signers[0].attrs_raw == None, true)
+            test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), "signed here")
+    test.case("two signers, detached content")
+    match cmssigned.sign(msg, true, [spec(cert_ed(), 0, ed_seed(), false, 5, true), spec(cert_ec(), 1, ec_scalar(), true, 6, true)])
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            let sd = signed_of(b)
+            test.assert_eq(list.len(sd.signers), 2)
+            test.assert_eq(list.len(sd.certs), 2)
+            test.assert_eq(sd.content == None, true)
+            test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, Some(msg))), "signed here")
+            test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 1, Some(msg))), "signed here")
+            test.case("the certificate of the other signer verifies neither signature that is not its own")
+            let a = said(cmssigned.verify(sd, 0, h(cert_ed()), Some(msg)))
+            let b = said(cmssigned.verify(sd, 1, h(cert_ed()), Some(msg)))
+            test.assert_eq(a == "ok" and b == "ok", false)
+            test.assert_eq(a == "ok" or b == "ok", true)
+    test.case("refusals of the writer")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [])), "cms: malformed structure: a signed message has at least one signer")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_rsa(), 2, ec_scalar(), false, 0, true)])),
+        "cms: not implemented: signing with RSA: rsa-nv verifies RSA signatures and does not make them")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec("0500", 0, ed_seed(), false, 0, true)])), "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ed(), 0, "00", false, 0, true)])), "cms: unusable key: the Ed25519 seed is 32 bytes")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(), 1, "00", false, 0, true)])), "cms: unusable key: the P-256 scalar is 32 bytes and not zero")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(), 1, "0000000000000000000000000000000000000000000000000000000000000000", false, 0, true)])),
+        "cms: unusable key: the P-256 scalar is 32 bytes and not zero")
+
+@test
+fn test_signature_refusals() [io]
+    let sd = signed_of(h(ec()))
+    let s = sd.signers[0]
+    test.assert_eq_str(said(cmssigned.verify(sd, 1, h(cert_ec()), None)), "cms: no match: signer 1 of 1")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0 - 1, h(cert_ec()), None)), "cms: no match: signer -1 of 1")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h("0500"), None)), "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
+    test.case("an algorithm that is not implemented")
+    let odd = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                          attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: "1.2.3", sig_params: None, signature: s.signature }
+    test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [odd] }, 0, h(cert_ec()), None)), "cms: algorithm 1.2.3 is not implemented")
+    test.case("signed attributes that are missing, repeated or wrong")
+    let digest = cmsder.oct(h("00"))
+    let no_attrs = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                               attrs_raw: s.attrs_raw, attrs: [], sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
+    test.assert_eq_str(said(with_signer(sd, no_attrs)), "cms: bad attribute: 1.2.840.113549.1.9.4 is required")
+    let twice = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                            attrs_raw: s.attrs_raw, attrs: [CmsAttr { oid: OID_MESSAGE_DIGEST, values: [digest, digest] }],
+                            sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
+    test.assert_eq_str(said(with_signer(sd, twice)), "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
+    let doubled = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                              attrs_raw: s.attrs_raw, attrs: list.concat(s.attrs, s.attrs), sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
+    test.assert_eq_str(said(with_signer(sd, doubled)), "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
+    let wrong_type = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                                 attrs_raw: s.attrs_raw, attrs: swap_content_type(s.attrs), sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
+    test.assert_eq_str(said(with_signer(sd, wrong_type)),
+        "cms: bad attribute: the content type attribute is 1.2.840.113549.1.7.2, the content is 1.2.840.113549.1.7.1")
+    test.case("a signing time attribute that is repeated")
+    let timed = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
+                            attrs_raw: s.attrs_raw, attrs: list.concat(s.attrs, [CmsAttr { oid: OID_SIGNING_TIME, values: [] }]),
+                            sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
+    test.assert_eq_str(said(cmssigned.signing_time(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [timed] }, 0)), "cms: bad attribute: 1.2.840.113549.1.9.5 appears once with one value")
+
+fn with_signer(sd: CmsSigned, s: CmsSigner) -> Result<Bytes, CmsError>
+    cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
+                                 content: sd.content, certs: sd.certs, crls: sd.crls, signers: [s] }, 0, h(cert_ec()), None)
+
+// The attributes with the content type replaced by signed-data's.
+fn swap_content_type(attrs: [CmsAttr]) -> [CmsAttr]
+    var out: [CmsAttr] = []
+    for a in attrs
+        if a.oid == OID_CONTENT_TYPE
+            list.push(out, CmsAttr { oid: OID_CONTENT_TYPE, values: [must(cmsder.oid(OID_SIGNED_DATA))] })
+        else
+            list.push(out, a)
+    out
+
+@test
+fn test_reader_refusals() [io]
+    test.assert_eq_str(said(cmssigned.read(h(digested()))), "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.2 was expected")
+    let sd = signed_of(h(ec()))
+    test.case("an unknown certificate choice is skipped, a certificate that does not parse is not matched")
+    let junk = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
+                           certs: [h("3000"), h(cert_ec())], crls: [], signers: sd.signers }
+    match cmssigned.find_certificate(junk, 0)
+        None    => test.fail("not found")
+        Some(c) => test.assert_eq_str(hex(c), cert_ec())
+    test.assert_eq(cmssigned.find_certificate(junk, 5) == None, true)
+    test.case("a certificate that is not the one named")
+    let other = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
+                            certs: [h(cert_rsa())], crls: [], signers: sd.signers }
+    test.assert_eq(cmssigned.find_certificate(other, 0) == None, true)
+    test.case("a message with BER lengths and signed attributes that use the indefinite form")
+    test.assert_eq_str(said(cmssigned.read(h(indefinite_attrs()))), "cms: not DER: the signed attributes use the indefinite length")
+    test.case("pieces missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("")))), "cms: malformed structure: the version is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("020101")))), "cms: malformed structure: the digest algorithms is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100")))), "cms: malformed structure: the encapsulated content is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("02010131003000")))), "cms: malformed structure: the content type is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci())))), "cms: malformed structure: the signer infos is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci() + "3100")))), "ok")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci() + "3000")))), "cms: malformed structure: the signer infos are a SET")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + "300d06092a864886f70d0107010500" + "3100")))), "cms: malformed structure: the content is under [0]")
+
+fn data_eci() -> Str
+    "300b06092a864886f70d010701"
+
+// A ContentInfo of type signed-data whose SignedData holds `inner`, the
+// hex of its members.
+fn wrap_signed(inner: Str) -> Str
+    hex(must(cmsinfo.write(OID_SIGNED_DATA, cmsder.tlv(48, h(inner)))))
+
+// A SignedData whose signer's signed attributes use the indefinite length.
+fn indefinite_attrs() -> Str
+    wrap_signed("0201013100" + data_eci() + "3180" + "3080" + "020101" + "30053000020101" + "300b0609608648016503040201" + "a0800000" + "0000" + "0000")
