@@ -218,7 +218,8 @@ fn prf_of(oid: Str) -> Result<Pbkdf2Prf, CmsError>
 // password with the salt, count and PRF of its parameters, as long as the
 // key of the cipher its key encryption algorithm names.  The count is the
 // sender's, so the caller bounds it with `max_iterations`.
-fn password_kek(r: CmsRecipient, password: Bytes, max_iterations: Int, klen: Int) -> Result<Bytes, CmsError>
+fn password_kek(r: CmsRecipient, password: Bytes, max_iterations: Int,
+                klen: Int) -> Result<Bytes, CmsError>
     if r.kdf != OID_PBKDF2
         return Err(CmsUnsupportedAlg(r.kdf))
     match r.kdf_params
@@ -237,7 +238,7 @@ fn password_kek(r: CmsRecipient, password: Bytes, max_iterations: Int, klen: Int
                 return Err(CmsBadKey("the iteration count is ${count}, the limit is ${max_iterations}"))
             match pbkdf2params.allowing_below_floor(prf, count, klen)
                 // cov: skip — the count is positive by the check above and the length is one the cap allows
-                Err(e) => Err(CmsBadKey(e.message()))
+                Err(e)     => Err(CmsBadKey(e.message()))
                 Ok(params) =>
                     match pbkdf2kdf.derive(params, password, salt)
                         // cov: skip — `derive` refuses only parameters, which `allowing_below_floor` has accepted
@@ -245,20 +246,23 @@ fn password_kek(r: CmsRecipient, password: Bytes, max_iterations: Int, klen: Int
                         Ok(k)  => Ok(k)
 
 // The CEK from the first PasswordRecipientInfo the password opens.
-pub fn cek_from_password(rs: [CmsRecipient], password: Bytes, max_iterations: Int) -> Result<Bytes, CmsError> []
+pub fn cek_from_password(rs: [CmsRecipient], password: Bytes,
+                         max_iterations: Int) -> Result<Bytes, CmsError> []
     for r in rs
         if r.kind == 3
             if r.alg != OID_PWRI_KEK
                 return Err(CmsUnsupportedAlg(r.alg))
             match r.alg_params
-                None    => return Err(CmsMalformed("the key encryption parameters"))
+                None    =>
+                    return Err(CmsMalformed("the key encryption parameters"))
                 Some(p) =>
                     let inner = cmsder.alg_of(p)!
                     let klen = cmsinfo.enc_key_len(inner.oid)
                     if klen == 0
                         return Err(CmsUnsupportedAlg(inner.oid))
                     match inner.params
-                        None     => return Err(CmsMalformed("the wrapping IV"))
+                        None      =>
+                            return Err(CmsMalformed("the wrapping IV"))
                         Some(ivn) =>
                             let iv = cmsder.octets(ivn)!
                             let kek = password_kek(r, password, max_iterations, klen)!
@@ -268,11 +272,13 @@ pub fn cek_from_password(rs: [CmsRecipient], password: Bytes, max_iterations: In
 // ── opening a message ────────────────────────────────────────────────
 
 // Decrypt an EnvelopedData with the CEK itself.
-pub fn decrypt_with_cek(msg: CmsEnveloped, cek: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+pub fn decrypt_with_cek(msg: CmsEnveloped, cek: Bytes,
+                        detached: ?Bytes) -> Result<Bytes, CmsError> []
     cmsinfo.eci_decrypt(msg.eci, cek, detached)
 
 // Decrypt with the KEK of the KEKRecipientInfo that names `key_id`.
-pub fn decrypt_with_kek(msg: CmsEnveloped, key_id: Bytes, kek: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+pub fn decrypt_with_kek(msg: CmsEnveloped, key_id: Bytes, kek: Bytes,
+                        detached: ?Bytes) -> Result<Bytes, CmsError> []
     let cek = cek_from_kek(msg.recipients, key_id, kek)!
     cmsinfo.eci_decrypt(msg.eci, cek, detached)
 
@@ -284,7 +290,8 @@ pub fn decrypt_with_password(msg: CmsEnveloped, password: Bytes, max_iterations:
 
 // Decrypt an AuthEnvelopedData with the CEK itself.  The tag is checked
 // before any plaintext is produced.
-pub fn auth_decrypt_with_cek(a: CmsAuthEnveloped, cek: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+pub fn auth_decrypt_with_cek(a: CmsAuthEnveloped, cek: Bytes,
+                             detached: ?Bytes) -> Result<Bytes, CmsError> []
     if not cmsinfo.is_gcm(a.eci.enc_alg)
         return Err(CmsUnsupportedAlg(a.eci.enc_alg))
     if bytes.len(cek) != cmsinfo.enc_key_len(a.eci.enc_alg)
@@ -299,12 +306,15 @@ pub fn auth_decrypt_with_cek(a: CmsAuthEnveloped, cek: Bytes, detached: ?Bytes) 
             ct = bytes.clone(c)
         None    =>
             match detached
-                None    => return Err(CmsNoContent)
-                Some(x) => ct = bytes.clone(x)
+                None    =>
+                    return Err(CmsNoContent)
+                Some(x) =>
+                    ct = bytes.clone(x)
     cmscrypto.gcm_open(cek, a.eci.iv, bytes.zeros(0), ct, a.mac)
 
 // Decrypt an AuthEnvelopedData with a KEK.
-pub fn auth_decrypt_with_kek(a: CmsAuthEnveloped, key_id: Bytes, kek: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+pub fn auth_decrypt_with_kek(a: CmsAuthEnveloped, key_id: Bytes, kek: Bytes,
+                             detached: ?Bytes) -> Result<Bytes, CmsError> []
     let cek = cek_from_kek(a.recipients, key_id, kek)!
     auth_decrypt_with_cek(a, cek, detached)
 
@@ -357,19 +367,25 @@ fn pwri_write(t: CmsPasswordTarget, cek: Bytes) -> Result<Bytes, CmsError>
     if bytes.len(t.salt) < 8
         return Err(CmsBadKey("the salt is at least 8 bytes"))
     match pbkdf2params.allowing_below_floor(prf, t.iterations, klen)
-        Err(e) => Err(CmsBadKey(e.message()))
+        Err(e)     => Err(CmsBadKey(e.message()))
         Ok(params) =>
             match pbkdf2kdf.derive(params, t.password, t.salt)
                 // cov: skip — `derive` refuses only parameters, which `allowing_below_floor` has accepted
-                Err(e) => Err(CmsBadKey(e.message()))
+                Err(e)  => Err(CmsBadKey(e.message()))
                 Ok(kek) =>
                     let wrapped = cmscrypto.pwri_wrap(kek, t.iv, cek, t.padding)!
-                    let pbkdf2 = cmsder.seq([cmsder.oct(t.salt), cmsder.int_u(t.iterations), cmsder.alg_id(t.prf, Some(cmsder.null_value()))!])
+                    let pbkdf2 = cmsder.seq([cmsder.oct(t.salt),
+                        cmsder.int_u(t.iterations),
+                        cmsder.alg_id(t.prf, Some(cmsder.null_value()))!])
                     let kdf = cmsder.ctx(0, bytes.concat([cmsder.oid(OID_PBKDF2)!, pbkdf2]))
                     let inner = cmsder.alg_id(t.wrap_alg, Some(cmsder.oct(t.iv)))!
-                    Ok(cmsder.ctx(3, bytes.concat([cmsder.int_u(0), kdf, cmsder.alg_id(OID_PWRI_KEK, Some(inner))!, cmsder.oct(wrapped)])))
+                    Ok(cmsder.ctx(3, bytes.concat([cmsder.int_u(0),
+                        kdf,
+                        cmsder.alg_id(OID_PWRI_KEK, Some(inner))!,
+                        cmsder.oct(wrapped)])))
 
-fn recipients_write(keks: [CmsKekTarget], pws: [CmsPasswordTarget], cek: Bytes) -> Result<Bytes, CmsError>
+fn recipients_write(keks: [CmsKekTarget], pws: [CmsPasswordTarget],
+                    cek: Bytes) -> Result<Bytes, CmsError>
     if list.len(keks) + list.len(pws) == 0
         return Err(CmsMalformed("a message has at least one recipient"))
     var parts: [Bytes] = []

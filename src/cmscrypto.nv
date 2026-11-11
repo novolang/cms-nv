@@ -11,14 +11,12 @@
 // of RFC 3211, whatever cipher its parameter names.
 
 use std.bytes
-use std.list
 use aes
 use aes_core
 use gcm
 use hashing
 use digest
 use cmserr
-use cmsoid
 
 // ── digests ──────────────────────────────────────────────────────────
 
@@ -227,7 +225,7 @@ pub fn pwri_unwrap(kek: Bytes, iv: Bytes, wrapped: Bytes) -> Result<Bytes, CmsEr
         return Err(CmsAuthFailed)
     var bad = 0
     for i in 0..3
-        bad = bad | (((bytes.byte_at(plain, 1 + i) ?? 0) ^ (bytes.byte_at(plain, 4 + i) ?? 0)) ^ 255)
+        bad = bad | ((bytes.byte_at(plain, 1 + i) ?? 0) ^ (bytes.byte_at(plain, 4 + i) ?? 0) ^ 255)
     if bad != 0
         return Err(CmsAuthFailed)
     Ok(bytes.slice(plain, 4, 4 + n))
@@ -240,7 +238,8 @@ pub struct CmsSealed
     tag: Bytes
 
 // Encrypt and authenticate.  The nonce is the caller's.
-pub fn gcm_seal(key: Bytes, nonce: Bytes, aad: Bytes, plain: Bytes) -> Result<CmsSealed, CmsError> []
+pub fn gcm_seal(key: Bytes, nonce: Bytes, aad: Bytes,
+                plain: Bytes) -> Result<CmsSealed, CmsError> []
     let k = aes_key(key)!
     match gcm.seal(k, nonce, aad, plain)
         None    => Err(CmsBadKey("the nonce is not empty"))
@@ -250,7 +249,8 @@ pub fn gcm_seal(key: Bytes, nonce: Bytes, aad: Bytes, plain: Bytes) -> Result<Cm
 
 // Check the tag and decrypt; nothing of the plaintext is produced when the
 // tag does not match.  Only the 16-byte tag is implemented.
-pub fn gcm_open(key: Bytes, nonce: Bytes, aad: Bytes, ct: Bytes, tag: Bytes) -> Result<Bytes, CmsError> []
+pub fn gcm_open(key: Bytes, nonce: Bytes, aad: Bytes, ct: Bytes,
+                tag: Bytes) -> Result<Bytes, CmsError> []
     if bytes.len(tag) != 16
         return Err(CmsNotImplemented("an AES-GCM tag of ${bytes.len(tag)} bytes, only 16 is implemented"))
     let k = aes_key(key)!

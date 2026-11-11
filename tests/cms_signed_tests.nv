@@ -46,10 +46,21 @@ fn signed_of(b: Bytes) -> CmsSigned
         Ok(s)  => s
         Err(e) =>
             test.fail(e.message())
-            CmsSigned { version: 0, digest_algs: [], content_type: "", content: None, certs: [], crls: [], signers: [] }
+            CmsSigned { version: 0,
+                digest_algs: [],
+                content_type: "",
+                content: None,
+                certs: [],
+                crls: [],
+                signers: [] }
 
 fn spec(cert: Str, scheme: Int, secret: Str, by_ski: Bool, time: Int, attrs: Bool) -> CmsSignerSpec
-    CmsSignerSpec { cert: h(cert), scheme: scheme, secret: h(secret), by_ski: by_ski, signing_time: time, attributes: attrs }
+    CmsSignerSpec { cert: h(cert),
+        scheme: scheme,
+        secret: h(secret),
+        by_ski: by_ski,
+        signing_time: time,
+        attributes: attrs }
 
 fn content() -> Str
     "Hello, CMS world.\r\n"
@@ -124,7 +135,8 @@ fn test_openssl_rsa_pkcs1_v1_5_with_sha256() [io]
         Ok(t)  => test.assert_eq(t == None, false)
         Err(e) => test.fail(e.message())
     test.case("another certificate does not verify it")
-    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_ec()), None)), "cms: unusable key: the certificate's key is not an RSA key")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_ec()), None)),
+        "cms: unusable key: the certificate's key is not an RSA key")
 
 @test
 fn test_openssl_rsa_pss_with_sha256() [io]
@@ -136,7 +148,8 @@ fn test_openssl_rsa_pss_with_sha256() [io]
     let none = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                            attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: None, signature: s.signature }
     test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
-        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [none] }, 0, h(cert_rsa()), None)),
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [none] },
+        0, h(cert_rsa()), None)),
         "cms: not implemented: RSASSA-PSS with the default SHA-1 parameters")
     let sha1_params = cmsder.root(must(cmsder.alg_id(OID_RSASSA_PSS, None)) + h(""))
     test.assert_eq_str(said(sha1_params), "ok")
@@ -147,8 +160,10 @@ fn test_openssl_rsa_pss_with_sha256() [io]
     test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA256, OID_SHA256, 20))))),
         "cms: not implemented: RSASSA-PSS with a salt length other than the hash length")
     test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA256, OID_SHA256, 32))))), "ok")
-    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA384, OID_SHA384, 48))))), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(pss_with(sd, "3004a1020500")), "cms: malformed structure: a primitive value has no members")
+    test.assert_eq_str(said(pss_with(sd, hex(must(pss_params(OID_SHA384, OID_SHA384, 48))))),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(pss_with(sd, "3004a1020500")),
+        "cms: malformed structure: a primitive value has no members")
 
 fn pss_params(hash_oid: Str, mgf_hash: Str, salt: Int) -> Result<Bytes, CmsError>
     let hash_alg = cmsder.alg_id(hash_oid, None)!
@@ -163,7 +178,8 @@ fn pss_with(sd: CmsSigned, params_hex: Str) -> Result<Bytes, CmsError>
     let changed = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                               attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: Some(node), signature: s.signature }
     cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
-                                 certs: sd.certs, crls: sd.crls, signers: [changed] }, 0, h(cert_rsa()), None)
+                                 certs: sd.certs, crls: sd.crls, signers: [changed] },
+                                 0, h(cert_rsa()), None)
 
 @test
 fn test_openssl_ecdsa_p256_with_sha256() [io]
@@ -181,24 +197,29 @@ fn test_openssl_ecdsa_p256_with_sha256() [io]
                           attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: s.sig_params, signature: sig }
     let m = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
                         certs: sd.certs, crls: sd.crls, signers: [bad] }
-    test.assert_eq_str(said(cmssigned.verify(m, 0, h(cert_ec()), None)), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmssigned.verify(m, 0, h(cert_ec()), None)),
+        "cms: the signature, digest or tag did not verify")
     let other = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
                             content: Some(bytes.from_str("another text")), certs: sd.certs, crls: sd.crls, signers: sd.signers }
-    test.assert_eq_str(said(cmssigned.verify(other, 0, h(cert_ec()), None)), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmssigned.verify(other, 0, h(cert_ec()), None)),
+        "cms: the signature, digest or tag did not verify")
     test.case("a signature that is not a DER SEQUENCE of two integers")
     let garbage = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                               attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: s.sig_alg, sig_params: s.sig_params, signature: h("0102") }
     test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
-        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [garbage] }, 0, h(cert_ec()), None)),
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [garbage] },
+        0, h(cert_ec()), None)),
         "cms: the signature, digest or tag did not verify")
 
 @test
 fn test_openssl_detached_signature_and_the_certificate_bag() [io]
     let sd = signed_of(h(ec_detached()))
     test.assert_eq(sd.content == None, true)
-    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, None)), "cms: the message has detached content and none was supplied")
+    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, None)),
+        "cms: the message has detached content and none was supplied")
     test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, Some(bytes.from_str(content())))), content())
-    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, Some(bytes.from_str("other")))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmssigned.verify_embedded(sd, 0, Some(bytes.from_str("other")))),
+        "cms: the signature, digest or tag did not verify")
     let full = signed_of(h(ec()))
     test.assert_eq_str(said(cmssigned.verify_embedded(full, 0, Some(bytes.from_str(content())))),
         "cms: content was supplied for a message that carries its own")
@@ -212,8 +233,10 @@ fn test_openssl_detached_signature_and_the_certificate_bag() [io]
     match cmssigned.certs_only_write([h(cert_ec()), h(cert_rsa())])
         Ok(b)  => test.assert_eq_str(hex(b), certs_only())
         Err(e) => test.fail(e.message())
-    test.assert_eq_str(said(cmssigned.certs_only_write([])), "cms: malformed structure: a certificate bag holds at least one certificate")
-    test.assert_eq_str(said(cmssigned.verify_embedded(bag, 0, None)), "cms: no match: a certificate in the message for signer 0")
+    test.assert_eq_str(said(cmssigned.certs_only_write([])),
+        "cms: malformed structure: a certificate bag holds at least one certificate")
+    test.assert_eq_str(said(cmssigned.verify_embedded(bag, 0, None)),
+        "cms: no match: a certificate in the message for signer 0")
     test.assert_eq_str(said(cmssigned.verify(bag, 0, h(cert_ec()), None)), "cms: no match: signer 0 of 0")
     test.assert_eq_str(said(cmssigned.signing_time(bag, 0)), "cms: no match: signer 0")
     test.assert_eq(cmssigned.find_certificate(bag, 0) == None, true)
@@ -254,7 +277,9 @@ fn test_signing_with_ecdsa_and_ed25519() [io]
             test.assert_eq(sd.signers[0].attrs_raw == None, true)
             test.assert_eq_str(text_of(cmssigned.verify_embedded(sd, 0, None)), "signed here")
     test.case("two signers, detached content")
-    match cmssigned.sign(msg, true, [spec(cert_ed(), 0, ed_seed(), false, 5, true), spec(cert_ec(), 1, ec_scalar(), true, 6, true)])
+    match cmssigned.sign(msg,
+        true,
+        [spec(cert_ed(), 0, ed_seed(), false, 5, true), spec(cert_ec(), 1, ec_scalar(), true, 6, true)])
         Err(e) => test.fail(e.message())
         Ok(b)  =>
             let sd = signed_of(b)
@@ -269,13 +294,22 @@ fn test_signing_with_ecdsa_and_ed25519() [io]
             test.assert_eq(a == "ok" and b == "ok", false)
             test.assert_eq(a == "ok" or b == "ok", true)
     test.case("refusals of the writer")
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [])), "cms: malformed structure: a signed message has at least one signer")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [])),
+        "cms: malformed structure: a signed message has at least one signer")
     test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_rsa(), 2, ec_scalar(), false, 0, true)])),
         "cms: not implemented: signing with RSA: rsa-nv verifies RSA signatures and does not make them")
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec("0500", 0, ed_seed(), false, 0, true)])), "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ed(), 0, "00", false, 0, true)])), "cms: unusable key: the Ed25519 seed is 32 bytes")
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(), 1, "00", false, 0, true)])), "cms: unusable key: the P-256 scalar is 32 bytes and not zero")
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(), 1, "0000000000000000000000000000000000000000000000000000000000000000", false, 0, true)])),
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec("0500", 0, ed_seed(), false, 0, true)])),
+        "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ed(), 0, "00", false, 0, true)])),
+        "cms: unusable key: the Ed25519 seed is 32 bytes")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(), 1, "00", false, 0, true)])),
+        "cms: unusable key: the P-256 scalar is 32 bytes and not zero")
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [spec(cert_ec(),
+        1,
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        false,
+        0,
+        true)])),
         "cms: unusable key: the P-256 scalar is 32 bytes and not zero")
 
 @test
@@ -284,12 +318,15 @@ fn test_signature_refusals() [io]
     let s = sd.signers[0]
     test.assert_eq_str(said(cmssigned.verify(sd, 1, h(cert_ec()), None)), "cms: no match: signer 1 of 1")
     test.assert_eq_str(said(cmssigned.verify(sd, 0 - 1, h(cert_ec()), None)), "cms: no match: signer -1 of 1")
-    test.assert_eq_str(said(cmssigned.verify(sd, 0, h("0500"), None)), "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h("0500"), None)),
+        "cms: unusable key: the certificate: x509: asn1: expected tag 16 at byte 0 and found tag 5")
     test.case("an algorithm that is not implemented")
     let odd = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                           attrs_raw: s.attrs_raw, attrs: s.attrs, sig_alg: "1.2.3", sig_params: None, signature: s.signature }
     test.assert_eq_str(said(cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
-        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [odd] }, 0, h(cert_ec()), None)), "cms: algorithm 1.2.3 is not implemented")
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [odd] },
+        0, h(cert_ec()), None)),
+        "cms: algorithm 1.2.3 is not implemented")
     test.case("signed attributes that are missing, repeated or wrong")
     let digest = cmsder.oct(h("00"))
     let no_attrs = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
@@ -298,10 +335,12 @@ fn test_signature_refusals() [io]
     let twice = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                             attrs_raw: s.attrs_raw, attrs: [CmsAttr { oid: OID_MESSAGE_DIGEST, values: [digest, digest] }],
                             sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
-    test.assert_eq_str(said(with_signer(sd, twice)), "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
+    test.assert_eq_str(said(with_signer(sd, twice)),
+        "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
     let doubled = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                               attrs_raw: s.attrs_raw, attrs: list.concat(s.attrs, s.attrs), sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
-    test.assert_eq_str(said(with_signer(sd, doubled)), "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
+    test.assert_eq_str(said(with_signer(sd, doubled)),
+        "cms: bad attribute: 1.2.840.113549.1.9.4 appears once with one value")
     let wrong_type = CmsSigner { version: 1, issuer: s.issuer, serial: s.serial, ski: s.ski, digest_alg: s.digest_alg,
                                  attrs_raw: s.attrs_raw, attrs: swap_content_type(s.attrs), sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
     test.assert_eq_str(said(with_signer(sd, wrong_type)),
@@ -311,11 +350,14 @@ fn test_signature_refusals() [io]
                             attrs_raw: s.attrs_raw, attrs: list.concat(s.attrs, [CmsAttr { oid: OID_SIGNING_TIME, values: [] }]),
                             sig_alg: s.sig_alg, sig_params: s.sig_params, signature: s.signature }
     test.assert_eq_str(said(cmssigned.signing_time(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
-        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [timed] }, 0)), "cms: bad attribute: 1.2.840.113549.1.9.5 appears once with one value")
+        content: sd.content, certs: sd.certs, crls: sd.crls, signers: [timed] },
+        0)),
+        "cms: bad attribute: 1.2.840.113549.1.9.5 appears once with one value")
 
 fn with_signer(sd: CmsSigned, s: CmsSigner) -> Result<Bytes, CmsError>
     cmssigned.verify(CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type,
-                                 content: sd.content, certs: sd.certs, crls: sd.crls, signers: [s] }, 0, h(cert_ec()), None)
+                                 content: sd.content, certs: sd.certs, crls: sd.crls, signers: [s] },
+                                 0, h(cert_ec()), None)
 
 // The attributes with the content type replaced by signed-data's.
 fn swap_content_type(attrs: [CmsAttr]) -> [CmsAttr]
@@ -329,7 +371,8 @@ fn swap_content_type(attrs: [CmsAttr]) -> [CmsAttr]
 
 @test
 fn test_reader_refusals() [io]
-    test.assert_eq_str(said(cmssigned.read(h(digested()))), "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.2 was expected")
+    test.assert_eq_str(said(cmssigned.read(h(digested()))),
+        "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.2 was expected")
     let sd = signed_of(h(ec()))
     test.case("an unknown certificate choice is skipped, a certificate that does not parse is not matched")
     let junk = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
@@ -343,16 +386,23 @@ fn test_reader_refusals() [io]
                             certs: [h(cert_rsa())], crls: [], signers: sd.signers }
     test.assert_eq(cmssigned.find_certificate(other, 0) == None, true)
     test.case("a message with BER lengths and signed attributes that use the indefinite form")
-    test.assert_eq_str(said(cmssigned.read(h(indefinite_attrs()))), "cms: not DER: the signed attributes use the indefinite length")
+    test.assert_eq_str(said(cmssigned.read(h(indefinite_attrs()))),
+        "cms: not DER: the signed attributes use the indefinite length")
     test.case("pieces missing")
     test.assert_eq_str(said(cmssigned.read(h(wrap_signed("")))), "cms: malformed structure: the version is missing")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("020101")))), "cms: malformed structure: the digest algorithms is missing")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100")))), "cms: malformed structure: the encapsulated content is missing")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("02010131003000")))), "cms: malformed structure: the content type is missing")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci())))), "cms: malformed structure: the signer infos is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("020101")))),
+        "cms: malformed structure: the digest algorithms is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100")))),
+        "cms: malformed structure: the encapsulated content is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("02010131003000")))),
+        "cms: malformed structure: the content type is missing")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci())))),
+        "cms: malformed structure: the signer infos is missing")
     test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci() + "3100")))), "ok")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci() + "3000")))), "cms: malformed structure: the signer infos are a SET")
-    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + "300d06092a864886f70d0107010500" + "3100")))), "cms: malformed structure: the content is under [0]")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + data_eci() + "3000")))),
+        "cms: malformed structure: the signer infos are a SET")
+    test.assert_eq_str(said(cmssigned.read(h(wrap_signed("0201013100" + "300d06092a864886f70d0107010500" + "3100")))),
+        "cms: malformed structure: the content is under [0]")
 
 fn data_eci() -> Str
     "300b06092a864886f70d010701"

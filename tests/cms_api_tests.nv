@@ -4,7 +4,6 @@
 
 use std.test
 use std.bytes
-use std.list
 use cmserr
 use cmsoid
 use cmsder
@@ -35,21 +34,23 @@ fn test_der_values_are_read_and_written() [io]
     // SEQUENCE { INTEGER 7, [1] IMPLICIT OCTET STRING 'ab', SET { NULL } }
     let doc = h("3009" + "020107" + "810261" + "62" + "3100")
     match cmsder.root(doc)
-        Err(e) => test.fail(e.message())
+        Err(e)  => test.fail(e.message())
         Ok(top) =>
             test.assert_eq_str(hex(cmsder.raw(top)), hex(doc))
             test.assert_eq(cmsder.is_universal(top, 16), true)
             test.assert_eq(cmsder.is_universal(top, 17), false)
             test.assert_eq_str(said(cmsder.expect(top, 16, "the document")), "ok")
-            test.assert_eq_str(said(cmsder.expect(top, 17, "the document")), "cms: malformed structure: the document is not the expected type")
+            test.assert_eq_str(said(cmsder.expect(top, 17, "the document")),
+                "cms: malformed structure: the document is not the expected type")
             match cmsder.children(top)
-                Err(e) => test.fail(e.message())
+                Err(e)   => test.fail(e.message())
                 Ok(kids) =>
                     test.assert_eq(cmsder.is_context(kids[1], 1), true)
                     test.assert_eq(cmsder.is_context(kids[1], 2), false)
                     test.assert_eq(cmsder.is_context(kids[0], 1), false)
                     test.assert_eq_str(said(cmsder.member(kids, 2, "the set")), "ok")
-                    test.assert_eq_str(said(cmsder.member(kids, 3, "the fourth")), "cms: malformed structure: the fourth is missing")
+                    test.assert_eq_str(said(cmsder.member(kids, 3, "the fourth")),
+                        "cms: malformed structure: the fourth is missing")
     test.case("an AlgorithmIdentifier with and without parameters")
     match cmsder.root(h(hex(must(cmsder.alg_id(OID_SHA256, Some(cmsder.null_value()))))))
         Err(e)  => test.fail(e.message())
@@ -98,7 +99,8 @@ fn test_encrypted_content_info_and_cbc_by_name() [io]
         Err(e)   => test.fail(e.message())
         Ok(info) =>
             test.assert_eq_str(said(cmsinfo.content_of(info, OID_DATA)), "ok")
-            test.assert_eq_str(said(cmsinfo.content_of(info, OID_SIGNED_DATA)), "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.2 was expected")
+            test.assert_eq_str(said(cmsinfo.content_of(info, OID_SIGNED_DATA)),
+                "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.2 was expected")
     test.case("raw CBC and the padding")
     test.assert_eq(bytes.len(cmscrypto.pad(h("0102"))), 16)
     match cmscrypto.cbc_encrypt_raw(key, iv, bytes.zeros(32))
@@ -113,7 +115,13 @@ fn test_the_password_key_by_name() [io]
     let cek = h("000102030405060708090a0b0c0d0e0f")
     let target = CmsPasswordTarget { password: bytes.from_str("pw"), salt: h("0001020304050607"), iterations: 1000, prf: OID_HMAC_SHA256,
                                      wrap_alg: OID_AES128_CBC, iv: h("000102030405060708090a0b0c0d0e0f"), padding: bytes.zeros(32) }
-    match cmsenv.enveloped_write(OID_AES128_CBC, cek, h("0f0e0d0c0b0a09080706050403020100"), bytes.from_str("x"), [], [target], false)
+    match cmsenv.enveloped_write(OID_AES128_CBC,
+        cek,
+        h("0f0e0d0c0b0a09080706050403020100"),
+        bytes.from_str("x"),
+        [],
+        [target],
+        false)
         Err(e) => test.fail(e.message())
         Ok(b)  =>
             match cmsenv.enveloped_read(b)

@@ -287,8 +287,10 @@ fn pss_params(s: CmsSigner) -> Result<RsaHash, CmsError>
                 if cmsder.is_context(k, 1)
                     let m = cmsder.alg_of(cmsder.member(cmsder.children(k)!, 0, "the mask generation function")!)!
                     match m.params
-                        None     => return Err(CmsMalformed("the MGF1 parameters"))
-                        Some(mp) => mgf_hash = cmsder.alg_of(mp)!.oid
+                        None     =>
+                            return Err(CmsMalformed("the MGF1 parameters"))
+                        Some(mp) =>
+                            mgf_hash = cmsder.alg_of(mp)!.oid
                 if cmsder.is_context(k, 2)
                     salt = cmsder.int_value(cmsder.member(cmsder.children(k)!, 0, "the salt length")!)!
             let h = rsa_hash(hash_oid)!
@@ -317,8 +319,8 @@ fn verify_ecdsa(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Re
         Err(e) => Err(CmsBadKey(e.message()))
         Ok(pt) =>
             match asn1pkix.ecdsa_signature_rs(s.signature, 32, asn1read.default_limits())
-                Err(_)  => Err(CmsAuthFailed)
-                Ok(rs)  =>
+                Err(_) => Err(CmsAuthFailed)
+                Ok(rs) =>
                     let h = cmscrypto.digest_of(s.digest_alg, input)!
                     let leftmost = bytes.slice(h, 0, 32)
                     if bytes.len(h) < 32
@@ -326,7 +328,9 @@ fn verify_ecdsa(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Re
                     match p256.public_key_from_bytes(bytes.to_byte_list(pt.x), bytes.to_byte_list(pt.y))
                         Err(_) => Err(CmsBadKey("the public key is not a P-256 point"))
                         Ok(pk) =>
-                            match p256.ecdsa_verify(pk, bytes.to_byte_list(leftmost), bytes.to_byte_list(bytes.concat([rs.r, rs.s])))
+                            match p256.ecdsa_verify(pk,
+                                bytes.to_byte_list(leftmost),
+                                bytes.to_byte_list(bytes.concat([rs.r, rs.s])))
                                 Err(_)   => Err(CmsBadKey("the public key is not a point of P-256"))
                                 Ok(good) =>
                                     if good
@@ -334,11 +338,12 @@ fn verify_ecdsa(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Re
                                     else
                                         Err(CmsAuthFailed)
 
-fn verify_ed25519(s: CmsSigner, spki: AsnSubjectPublicKeyInfo, input: Bytes) -> Result<Unit, CmsError>
+fn verify_ed25519(s: CmsSigner, spki: AsnSubjectPublicKeyInfo,
+                  input: Bytes) -> Result<Unit, CmsError>
     if bytes.len(s.signature) != 64
         return Err(CmsAuthFailed)
     match asn1pkix.ed25519_public_key(spki)
-        Err(e) => Err(CmsBadKey(e.message()))
+        Err(e)        => Err(CmsBadKey(e.message()))
         Ok(pub_bytes) =>
             match ed25519.verifying_key_from_bytes(bytes.to_byte_list(pub_bytes))
                 // cov: skip — the key is 32 bytes by `ed25519_public_key`, the only length the constructor refuses
@@ -449,7 +454,8 @@ fn sign_ecdsa(secret: Bytes, input: Bytes) -> Result<Bytes, CmsError>
                 Err(_)  => Err(CmsBadKey("the P-256 scalar is 32 bytes and not zero"))
                 Ok(sig) =>
                     let raw = bytes.from_byte_list(sig)
-                    Ok(cmsder.seq([cmsder.int_bytes(bytes.slice(raw, 0, 32)), cmsder.int_bytes(bytes.slice(raw, 32, 64))]))
+                    Ok(cmsder.seq([cmsder.int_bytes(bytes.slice(raw, 0, 32)),
+                        cmsder.int_bytes(bytes.slice(raw, 32, 64))]))
 
 fn attribute(oid: Str, value: Bytes) -> Result<Bytes, CmsError>
     Ok(cmsder.seq([cmsder.oid(oid)!, cmsder.set_of([value])]))
@@ -462,17 +468,23 @@ fn signer_write(sp: CmsSignerSpec, content_type: Str, content: Bytes) -> Result<
     var version = 1
     if sp.by_ski
         match x509ext.subject_key_identifier(c.extensions, asn1read.default_limits())
-            Err(e)  => return Err(CmsBadKey(e.message()))
+            Err(e)  =>
+                return Err(CmsBadKey(e.message()))
             Ok(ski) =>
                 match ski
-                    None     => return Err(CmsBadKey("the certificate has no subject key identifier"))
-                    Some(id) => sid = cmsder.ctx_prim(0, id)
+                    None     =>
+                        return Err(CmsBadKey("the certificate has no subject key identifier"))
+                    Some(id) =>
+                        sid = cmsder.ctx_prim(0, id)
         version = 3
     else
         let name = bytes.slice(sp.cert, c.issuer.span.off, c.issuer.span.off + c.issuer.span.len)
         sid = cmsder.seq([name, cmsder.tlv(2, c.serial)])
     let dalg = digest_for(sp.scheme)
-    let salg = if sp.scheme == 0 then OID_ED25519 else OID_ECDSA_SHA256
+    let salg = if sp.scheme == 0
+        OID_ED25519
+    else
+        OID_ECDSA_SHA256
     var parts: [Bytes] = [cmsder.int_u(version), sid, cmsder.alg_id(dalg, None)!]
     var input = bytes.clone(content)
     if sp.attributes

@@ -88,7 +88,11 @@ fn some_message(recipients: Str) -> CmsEnveloped
         Ok(m)  => m
         Err(e) =>
             test.fail(e.message())
-            CmsEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "", enc_alg: "", iv: bytes.zeros(0), icv_len: 0, encrypted: None } }
+            CmsEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "",
+                enc_alg: "",
+                iv: bytes.zeros(0),
+                icv_len: 0,
+                encrypted: None } }
 
 fn rsa_pkcs1() -> Str
     "308205ae06092a864886f70d010702a082059f3082059b020101310d300b0609608648016503040201302206092a864886f70d010701a015041348656c6c6f2c20434d5320776f726c642e0d0aa082031b30820317308201ffa00302010202141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300d06092a864886f70d01010b0500301a3118301606035504030c0f636d732d6e762072736120746573743020170d3236313131313038353831305a180f32313236313031383038353831305a301a3118301606035504030c0f636d732d6e7620727361207465737430820122300d06092a864886f70d01010105000382010f003082010a0282010100c54ebfb4a209d1c5c335f2bea8c1d8b3ce8f7a300b0488ed1dfcb948de24ca9bb42e1f655af35cc52c3991e10042317137103dacf983671cd027205cd6bab6b00bda91c1e657287bc40db122f4c77a30229e8b17aa0710d5d1f6a203e769e111edc9648f8de69780a0c4f0d427090c5bda02d640a3e77c21e1be3e7aeb144e4f0e7a731ab8fefccd9361007da65c3bfa28d89a771d068fe63919c6b4fddd6a2068beb4115ef5665df93e5d40c23fde727a2ac65dc62e46f5add87884e1c389f60480ee119c4077101f8947f98586a5ad6222ab3b53ac20497cd14f4e178d894c9884acc53e76e2bdd667724bb0da7eda3cb4958619fb41aa0de0223bad113ce10203010001a3533051301d0603551d0e04160414625ade34dc155decd30a63d3085b0c28b8a62e0b301f0603551d23041830168014625ade34dc155decd30a63d3085b0c28b8a62e0b300f0603551d130101ff040530030101ff300d06092a864886f70d01010b05000382010100a6886fb73ea6430e1a0db699c478a74a897c39667edf7d3b7c8217b3cbe88f8b1b2c0bc2d1ad8e3b1f094904b7a7e842de9c814e98a5da1e8f3a8f2902a75157fc0efcaa474c7d20082000f750e03ba0e11d4b2bb0742cd691d08a3145536b6c35f03f6fae2406b9fa160b0b8ec2358646a8a5ed76d3cea90f77f672b89f74212f27056023a0be2ca8bab90ea72c4a41b2892b1ff3d558c0ca7943a30d932fa938c984dd052278f841b3504ca11a7fd23fd61479761d2090e507011ff913002cf57589b69c3fdc88299db5cc8b65e55dd153f75904fe3ad0279ab512d3f5437d65e968fc7562c08a2216fcba4932af2ec2193a7b2ffb46e420e226bf7cd30429318202423082023e0201013032301a3118301606035504030c0f636d732d6e7620727361207465737402141dd66bf0d588dbe5cfa6c64a6cd3f3787f7d29d3300b0609608648016503040201a081e4301806092a864886f70d010903310b06092a864886f70d010701301c06092a864886f70d010905310f170d3236313131313038353831305a302f06092a864886f70d010904312204206761903d7fd37a026b6c62847957cfb5a72d75dbeab1f05f2839e941bd400e3b307906092a864886f70d01090f316c306a300b060960864801650304012a300b0609608648016503040116300b0609608648016503040102300a06082a864886f70d0307300e06082a864886f70d030202020080300d06082a864886f70d0302020140300706052b0e030207300d06082a864886f70d0302020128300d06092a864886f70d010101050004820100b7a9d076a59d34642aa7a775a9e01f138af3c8c30b863b0c71d9928d52b124c618169d478bacf7e8efcfe3014c3416c2a5396e21a48e2ffc345e6e188b819fab2acb212f1dd69d45ce767a2c19484bcf6f85467e0ee8e2c36fba1541cce15f74af22b6fd2d355c7f3218e690836e748ea78fef5b003b949af2097225dc2b389a98cbeadc8a64eaa815fbf47ef682950c03d4631c2b5fe3f781ea9fb018e6fc6e3c863531f21fb1a991d2d438a228cc914ccc319f3b92578f025a495e547a5d507dcc948ea4163928928d5cf4fdaf9fcd801c79b37e97cd370cee12bedaf15174e737dd3529329b5f8409aa065a68178bbe7204c245a334bb4ca1f32512c483e8"
@@ -151,8 +155,10 @@ fn test_der_helpers() [io]
         Ok(n)  => test.assert_eq(n.cls, 3)
         Err(e) => test.fail(e.message())
     test.case("a truncated value, and an integer too long for an Int")
-    test.assert_eq_str(said(cmsder.node_at(h("3005020101"), 0)), "cms: malformed structure: asn1: a length of 5 at byte 0 runs past the 3 byte(s) left")
-    test.assert_eq_str(said(cmsder.node_at(h(""), 0)), "cms: malformed structure: asn1: the input ends at byte 0 with 1 more byte(s) needed")
+    test.assert_eq_str(said(cmsder.node_at(h("3005020101"), 0)),
+        "cms: malformed structure: asn1: a length of 5 at byte 0 runs past the 3 byte(s) left")
+    test.assert_eq_str(said(cmsder.node_at(h(""), 0)),
+        "cms: malformed structure: asn1: the input ends at byte 0 with 1 more byte(s) needed")
     match cmsder.node_at(h("0205000000000100"), 0)
         Ok(n)  => test.assert_eq_str(said(cmsder.int_value(n)), "cms: malformed structure: an INTEGER of up to four octets")
         Err(e) => test.fail(e.message())
@@ -165,7 +171,8 @@ fn test_der_helpers() [io]
         Ok(n)  => test.assert_eq_str(said(cmsder.oid_text(n)), "ok")
         Err(e) => test.fail(e.message())
     match cmsder.node_at(h("0602ffff"), 0)
-        Ok(n)  => test.assert_eq_str(said(cmsder.oid_text(n)), "cms: malformed structure: asn1: an OBJECT IDENTIFIER that is empty, padded or unfinished at byte 1")
+        Ok(n)  => test.assert_eq_str(said(cmsder.oid_text(n)),
+            "cms: malformed structure: asn1: an OBJECT IDENTIFIER that is empty, padded or unfinished at byte 1")
         Err(e) => test.fail(e.message())
     test.case("writing: long lengths, an empty integer, bad object identifiers")
     test.assert_eq(bytes.len(cmsder.tlv(4, bytes.zeros(70000))), 70006)
@@ -185,24 +192,31 @@ fn test_content_info_and_eci_refusals() [io]
         "cms: malformed structure: the content is under [0]")
     test.case("EncryptedContentInfo: RC2, an unknown algorithm, no parameters, a content that is not [0]")
     let rc2 = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algh(OID_RC2_CBC)))
-    test.assert_eq_str(said(cmsinfo.encrypted_read(h(rc2))), "cms: not implemented: RC2-CBC content encryption: the registry has no RC2")
+    test.assert_eq_str(said(cmsinfo.encrypted_read(h(rc2))),
+        "cms: not implemented: RC2-CBC content encryption: the registry has no RC2")
     let odd = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algh("1.2.3")))
     test.assert_eq_str(said(cmsinfo.encrypted_read(h(odd))), "cms: algorithm 1.2.3 is not implemented")
     let no_params = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algh(OID_AES128_CBC)))
-    test.assert_eq_str(said(cmsinfo.encrypted_read(h(no_params))), "cms: malformed structure: the content encryption parameters")
-    let bad_tag = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algp(OID_AES128_CBC, octh(zeros(16))) + "0500"))
-    test.assert_eq_str(said(cmsinfo.encrypted_read(h(bad_tag))), "cms: malformed structure: the encrypted content is [0]")
+    test.assert_eq_str(said(cmsinfo.encrypted_read(h(no_params))),
+        "cms: malformed structure: the content encryption parameters")
+    let bad_tag = wrapped(OID_ENCRYPTED_DATA,
+        inth(0) + t(48, oidh(OID_DATA) + algp(OID_AES128_CBC, octh(zeros(16))) + "0500"))
+    test.assert_eq_str(said(cmsinfo.encrypted_read(h(bad_tag))),
+        "cms: malformed structure: the encrypted content is [0]")
     test.case("AES-GCM content is not EnvelopedData content; a detached ciphertext is supplied")
-    let gcm_eci = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algp(OID_AES128_GCM, t(48, octh(zeros(12)))) + t(128, zeros(32))))
+    let gcm_eci = wrapped(OID_ENCRYPTED_DATA,
+        inth(0) + t(48, oidh(OID_DATA) + algp(OID_AES128_GCM, t(48, octh(zeros(12)))) + t(128, zeros(32))))
     match cmsinfo.encrypted_read(h(gcm_eci))
         Err(e) => test.fail(e.message())
         Ok(e)  =>
             test.assert_eq(e.eci.icv_len, 12)
-            test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, zeros_b(16), None)), "cms: malformed structure: AES-GCM content is AuthEnvelopedData, not EnvelopedData")
+            test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, zeros_b(16), None)),
+                "cms: malformed structure: AES-GCM content is AuthEnvelopedData, not EnvelopedData")
     let detached = wrapped(OID_ENCRYPTED_DATA, inth(0) + t(48, oidh(OID_DATA) + algp(OID_AES128_CBC, octh(zeros(16)))))
     match cmsinfo.encrypted_read(h(detached))
         Err(e) => test.fail(e.message())
-        Ok(e)  => test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, zeros_b(16), Some(zeros_b(16)))), "cms: the signature, digest or tag did not verify")
+        Ok(e)  => test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, zeros_b(16), Some(zeros_b(16)))),
+            "cms: the signature, digest or tag did not verify")
 
 fn zeros_b(n: Int) -> Bytes
     bytes.zeros(n)
@@ -214,7 +228,8 @@ fn test_recipient_readers() [io]
     let m = some_message(ktri_ski("aabb"))
     test.assert_eq_str(hex(m.recipients[0].key_id), "aabb")
     test.assert_eq(m.recipients[0].kind, 0)
-    test.assert_eq_str(read_env(enveloped("", t(48, inth(2) + "0500" + rsa + octh("00")))), "cms: malformed structure: the recipient identifier")
+    test.assert_eq_str(read_env(enveloped("", t(48, inth(2) + "0500" + rsa + octh("00")))),
+        "cms: malformed structure: the recipient identifier")
     test.case("the other kinds are read and not opened")
     let kari = some_message(t(161, ""))
     test.assert_eq(kari.recipients[0].kind, 1)
@@ -222,55 +237,77 @@ fn test_recipient_readers() [io]
         "cms: not implemented: KeyAgreeRecipientInfo: the ECDH recipient of RFC 5753 is not implemented, and no KEKRecipientInfo with the key identifier matched")
     let ori = some_message(t(164, ""))
     test.assert_eq(ori.recipients[0].kind, 4)
-    test.assert_eq_str(said(cmsenv.decrypt_with_kek(ori, h("01"), zeros_b(16), None)), "cms: no match: KEKRecipientInfo with the key identifier")
+    test.assert_eq_str(said(cmsenv.decrypt_with_kek(ori, h("01"), zeros_b(16), None)),
+        "cms: no match: KEKRecipientInfo with the key identifier")
     test.assert_eq_str(read_env(enveloped("", "0500")), "cms: malformed structure: a RecipientInfo")
     test.case("the shape of the message")
-    test.assert_eq_str(said(cmsenv.enveloped_read(h(wrapped(OID_ENVELOPED_DATA, inth(2) + "3000" + eci_cbc())))), "cms: malformed structure: the recipient infos are a SET")
+    test.assert_eq_str(said(cmsenv.enveloped_read(h(wrapped(OID_ENVELOPED_DATA, inth(2) + "3000" + eci_cbc())))),
+        "cms: malformed structure: the recipient infos are a SET")
     test.assert_eq_str(read_env(enveloped("", "")), "cms: malformed structure: a message has at least one recipient")
     test.assert_eq_str(read_env(enveloped("a000", ktri_ski("aa"))), "ok")
-    test.assert_eq_str(said(cmsenv.auth_read(h(auth_msg(eci_cbc(), "", ktri_ski("aa"))))), "cms: malformed structure: the MAC is missing")
-    test.assert_eq_str(said(cmsenv.auth_read(h(auth_msg(eci_cbc(), "a100" + octh("00"), ktri_ski("aa"))))), "cms: not implemented: authenticated attributes of AuthEnvelopedData")
-    let with_origin = wrapped(OID_AUTH_ENVELOPED_DATA, inth(0) + "a000" + t(49, ktri_ski("aa")) + eci_cbc() + octh(zeros(16)))
+    test.assert_eq_str(said(cmsenv.auth_read(h(auth_msg(eci_cbc(), "", ktri_ski("aa"))))),
+        "cms: malformed structure: the MAC is missing")
+    test.assert_eq_str(said(cmsenv.auth_read(h(auth_msg(eci_cbc(), "a100" + octh("00"), ktri_ski("aa"))))),
+        "cms: not implemented: authenticated attributes of AuthEnvelopedData")
+    let with_origin = wrapped(OID_AUTH_ENVELOPED_DATA,
+        inth(0) + "a000" + t(49, ktri_ski("aa")) + eci_cbc() + octh(zeros(16)))
     test.assert_eq_str(said(cmsenv.auth_read(h(with_origin))), "ok")
     let cbc_auth = some_auth(eci_cbc(), ktri_ski("aa"))
-    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(cbc_auth, zeros_b(16), None)), "cms: algorithm 2.16.840.1.101.3.4.1.2 is not implemented")
+    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(cbc_auth, zeros_b(16), None)),
+        "cms: algorithm 2.16.840.1.101.3.4.1.2 is not implemented")
 
 fn some_auth(eci: Str, recipients: Str) -> CmsAuthEnveloped
     match cmsenv.auth_read(h(auth_msg(eci, octh(zeros(16)), recipients)))
         Ok(m)  => m
         Err(e) =>
             test.fail(e.message())
-            CmsAuthEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "", enc_alg: "", iv: bytes.zeros(0), icv_len: 0, encrypted: None }, mac: bytes.zeros(0) }
+            CmsAuthEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "",
+                enc_alg: "",
+                iv: bytes.zeros(0),
+                icv_len: 0,
+                encrypted: None },
+            mac: bytes.zeros(0) }
 
 @test
 fn test_kek_and_password_recipient_refusals() [io]
     test.case("a KEK recipient with an algorithm that is not an AES wrap")
     let odd = some_message(kekri("01", algh("1.2.3"), zeros(24)))
-    test.assert_eq_str(said(cmsenv.decrypt_with_kek(odd, h("01"), zeros_b(16), None)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsenv.decrypt_with_kek(odd, h("01"), zeros_b(16), None)),
+        "cms: algorithm 1.2.3 is not implemented")
     let pbkdf2 = t(48, octh(zeros(8)) + inth(1000))
     test.case("a password recipient: the KDF, its parameters, the wrap algorithm, its parameters and the cipher inside")
-    let wrong_kdf = pwri_hex(algh("1.2.3") , algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(wrong_kdf), h("70"), 100, None)), "cms: algorithm 1.2.3 is not implemented")
+    let wrong_kdf = pwri_hex(algh("1.2.3"), algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(wrong_kdf), h("70"), 100, None)),
+        "cms: algorithm 1.2.3 is not implemented")
     let no_kdf_params = pwri_hex(algh(OID_PBKDF2), algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_kdf_params), h("70"), 100, None)), "cms: malformed structure: the PBKDF2 parameters")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_kdf_params), h("70"), 100, None)),
+        "cms: malformed structure: the PBKDF2 parameters")
     let kdf = algp(OID_PBKDF2, pbkdf2)
     let wrong_wrap = pwri_hex(kdf, algp("1.2.3", algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(wrong_wrap), h("70"), 100000, None)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(wrong_wrap), h("70"), 100000, None)),
+        "cms: algorithm 1.2.3 is not implemented")
     let no_wrap_params = pwri_hex(kdf, algh(OID_PWRI_KEK))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_wrap_params), h("70"), 100000, None)), "cms: malformed structure: the key encryption parameters")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_wrap_params), h("70"), 100000, None)),
+        "cms: malformed structure: the key encryption parameters")
     let odd_cipher = pwri_hex(kdf, algp(OID_PWRI_KEK, algh("1.2.3")))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(odd_cipher), h("70"), 100000, None)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(odd_cipher), h("70"), 100000, None)),
+        "cms: algorithm 1.2.3 is not implemented")
     let no_iv = pwri_hex(kdf, algp(OID_PWRI_KEK, algh(OID_AES128_CBC)))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_iv), h("70"), 100000, None)), "cms: malformed structure: the wrapping IV")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(no_iv), h("70"), 100000, None)),
+        "cms: malformed structure: the wrapping IV")
     test.case("PBKDF2 parameters with a key length, with SHA-256 and with an unknown PRF")
     let with_len = algp(OID_PBKDF2, t(48, octh(zeros(8)) + inth(1000) + inth(16) + algp(OID_HMAC_SHA256, "0500")))
     let ok_shape = pwri_hex(with_len, algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(ok_shape), h("70"), 100000, None)), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(ok_shape), h("70"), 100000, None)),
+        "cms: the signature, digest or tag did not verify")
     let odd_prf = algp(OID_PBKDF2, t(48, octh(zeros(8)) + inth(1000) + algp("1.2.3", "0500")))
     let bad_prf = pwri_hex(odd_prf, algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(bad_prf), h("70"), 100000, None)), "cms: algorithm 1.2.3 is not implemented")
-    let zero_count = pwri_hex(algp(OID_PBKDF2, t(48, octh(zeros(8)) + inth(0))), algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
-    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(zero_count), h("70"), 100000, None)), "cms: unusable key: the iteration count is 0, the limit is 100000")
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(bad_prf), h("70"), 100000, None)),
+        "cms: algorithm 1.2.3 is not implemented")
+    let zero_count = pwri_hex(algp(OID_PBKDF2, t(48, octh(zeros(8)) + inth(0))),
+        algp(OID_PWRI_KEK, algp(OID_AES128_CBC, octh(zeros(16)))))
+    test.assert_eq_str(said(cmsenv.decrypt_with_password(some_message(zero_count), h("70"), 100000, None)),
+        "cms: unusable key: the iteration count is 0, the limit is 100000")
 
 // A PasswordRecipientInfo from its two algorithm identifiers, version 0 and
 // a 40-byte encrypted key; the key derivation algorithm is under [0].
@@ -292,7 +329,8 @@ fn test_a_wrapped_key_with_wrong_check_octets() [io]
         Ok(pass1) =>
             match cmscrypto.cbc_encrypt_raw(kek, bytes.slice(pass1, 16, 32), pass1)
                 Err(e)   => test.fail(e.message())
-                Ok(wrap) => test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, wrap)), "cms: the signature, digest or tag did not verify")
+                Ok(wrap) => test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, wrap)),
+                    "cms: the signature, digest or tag did not verify")
 
 // ── SignedData ───────────────────────────────────────────────────────
 
@@ -316,13 +354,20 @@ fn signed_of(b: Bytes) -> CmsSigned
         Ok(s)  => s
         Err(e) =>
             test.fail(e.message())
-            CmsSigned { version: 0, digest_algs: [], content_type: "", content: None, certs: [], crls: [], signers: [] }
+            CmsSigned { version: 0,
+                digest_algs: [],
+                content_type: "",
+                content: None,
+                certs: [],
+                crls: [],
+                signers: [] }
 
 fn with(sd: CmsSigned, s: CmsSigner) -> CmsSigned
     CmsSigned { version: sd.version, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
                 certs: sd.certs, crls: sd.crls, signers: [s] }
 
-fn like(s: CmsSigner, sig_alg: Str, digest_alg: Str, attrs_raw: ?Bytes, ski: Bytes, serial: Bytes, signature: Bytes) -> CmsSigner
+fn like(s: CmsSigner, sig_alg: Str, digest_alg: Str, attrs_raw: ?Bytes, ski: Bytes, serial: Bytes,
+        signature: Bytes) -> CmsSigner
     CmsSigner { version: s.version, issuer: s.issuer, serial: serial, ski: ski, digest_alg: digest_alg, attrs_raw: attrs_raw,
                 attrs: s.attrs, sig_alg: sig_alg, sig_params: s.sig_params, signature: signature }
 
@@ -345,10 +390,17 @@ fn test_signature_checks_with_changed_certificates() [io]
     let sd = signed_of(h(ec()))
     let s = sd.signers[0]
     test.case("a serial number with a leading zero still matches")
-    let padded = with(sd, like(s, s.sig_alg, s.digest_alg, s.attrs_raw, s.ski, bytes.concat([h("00"), s.serial]), s.signature))
+    let padded = with(sd,
+        like(s, s.sig_alg, s.digest_alg, s.attrs_raw, s.ski, bytes.concat([h("00"), s.serial]), s.signature))
     test.assert_eq(cmssigned.find_certificate(padded, 0) == None, false)
     test.case("a signer that names its certificate by key identifier; a certificate without one; a malformed one")
-    let by_key = with(sd, like(s, s.sig_alg, s.digest_alg, s.attrs_raw, h("3917b027f008ae25cef197b741e628dd9b7f7db7"), bytes.zeros(0), s.signature))
+    let by_key = with(sd, like(s,
+        s.sig_alg,
+        s.digest_alg,
+        s.attrs_raw,
+        h("3917b027f008ae25cef197b741e628dd9b7f7db7"),
+        bytes.zeros(0),
+        s.signature))
     test.assert_eq(cmssigned.find_certificate(by_key, 0) == None, false)
     let no_ski = CmsSigned { version: 1, digest_algs: sd.digest_algs, content_type: sd.content_type, content: sd.content,
                              certs: [h(cert_plain())], crls: [], signers: by_key.signers }
@@ -357,14 +409,19 @@ fn test_signature_checks_with_changed_certificates() [io]
                               certs: [h(malformed_ski())], crls: [], signers: by_key.signers }
     test.assert_eq(cmssigned.find_certificate(bad_ski, 0) == None, true)
     test.case("verification against keys that do not fit")
-    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_p384()), None)), "cms: unusable key: the public key is not a P-256 point")
-    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(off_curve()), None)), "cms: unusable key: the public key is not a point of P-256")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_p384()), None)),
+        "cms: unusable key: the public key is not a P-256 point")
+    test.assert_eq_str(said(cmssigned.verify(sd, 0, h(off_curve()), None)),
+        "cms: unusable key: the public key is not a point of P-256")
     let sha1 = with(sd, like(s, s.sig_alg, OID_SHA1, None, s.ski, s.serial, s.signature))
-    test.assert_eq_str(said(cmssigned.verify(sha1, 0, h(cert_ec()), None)), "cms: not implemented: ECDSA with a digest shorter than 256 bits")
+    test.assert_eq_str(said(cmssigned.verify(sha1, 0, h(cert_ec()), None)),
+        "cms: not implemented: ECDSA with a digest shorter than 256 bits")
     let rsa_signed = signed_of(h(rsa_pkcs1()))
-    test.assert_eq_str(said(cmssigned.verify(rsa_signed, 0, h(cert_r1024()), None)), "cms: unusable key: rsa: the modulus is 1024 bits, below 2048")
+    test.assert_eq_str(said(cmssigned.verify(rsa_signed, 0, h(cert_r1024()), None)),
+        "cms: unusable key: rsa: the modulus is 1024 bits, below 2048")
     let rs = rsa_signed.signers[0]
-    let sha1_rsa = with(rsa_signed, like(rs, OID_SHA1_WITH_RSA, OID_SHA1, None, bytes.zeros(0), rs.serial, rs.signature))
+    let sha1_rsa = with(rsa_signed,
+        like(rs, OID_SHA1_WITH_RSA, OID_SHA1, None, bytes.zeros(0), rs.serial, rs.signature))
     test.assert_eq_str(said(cmssigned.verify(sha1_rsa, 0, h(cert_rsa()), None)),
         "cms: not implemented: RSA with the digest 1.3.14.3.2.26: rsa-nv verifies SHA-256 and SHA-384")
     let pss = signed_of(h(rsa_pss()))
@@ -375,7 +432,8 @@ fn test_signature_checks_with_changed_certificates() [io]
             let ps = pss.signers[0]
             let changed = CmsSigner { version: 1, issuer: ps.issuer, serial: ps.serial, ski: ps.ski, digest_alg: ps.digest_alg,
                                       attrs_raw: ps.attrs_raw, attrs: ps.attrs, sig_alg: ps.sig_alg, sig_params: Some(node), signature: ps.signature }
-            test.assert_eq_str(said(cmssigned.verify(with(pss, changed), 0, h(cert_rsa()), None)), "cms: malformed structure: the MGF1 parameters")
+            test.assert_eq_str(said(cmssigned.verify(with(pss, changed), 0, h(cert_rsa()), None)),
+                "cms: malformed structure: the MGF1 parameters")
 
 fn malformed_ski() -> Str
     str.replace(cert_ec(), "0603551d0e04160414", "0603551d0e04160514")
@@ -393,7 +451,12 @@ fn off_curve() -> Str
 @test
 fn test_ed25519_edges() [io]
     let msg = bytes.from_str("ed")
-    let spec = CmsSignerSpec { cert: h(cert_ed()), scheme: 0, secret: h(ed_seed()), by_ski: false, signing_time: 0 - 1, attributes: false }
+    let spec = CmsSignerSpec { cert: h(cert_ed()),
+        scheme: 0,
+        secret: h(ed_seed()),
+        by_ski: false,
+        signing_time: 0 - 1,
+        attributes: false }
     match cmssigned.sign(msg, false, [spec])
         Err(e) => test.fail(e.message())
         Ok(b)  =>
@@ -402,15 +465,25 @@ fn test_ed25519_edges() [io]
             test.assert_eq_str(said(cmssigned.verify(sd, 0, h(cert_ed()), None)), "ok")
             test.case("a signature of the wrong length; one that is not a signature; one over other content")
             let short = with(sd, like(s, s.sig_alg, s.digest_alg, s.attrs_raw, s.ski, s.serial, h("0102")))
-            test.assert_eq_str(said(cmssigned.verify(short, 0, h(cert_ed()), None)), "cms: the signature, digest or tag did not verify")
-            let ones = with(sd, like(s, s.sig_alg, s.digest_alg, s.attrs_raw, s.ski, s.serial, bytes.fill(bytes.zeros(64), 0, 64, 255)))
-            test.assert_eq_str(said(cmssigned.verify(ones, 0, h(cert_ed()), None)), "cms: the signature, digest or tag did not verify")
+            test.assert_eq_str(said(cmssigned.verify(short, 0, h(cert_ed()), None)),
+                "cms: the signature, digest or tag did not verify")
+            let ones = with(sd, like(s,
+                s.sig_alg,
+                s.digest_alg,
+                s.attrs_raw,
+                s.ski,
+                s.serial,
+                bytes.fill(bytes.zeros(64), 0, 64, 255)))
+            test.assert_eq_str(said(cmssigned.verify(ones, 0, h(cert_ed()), None)),
+                "cms: the signature, digest or tag did not verify")
             let other = CmsSigned { version: sd.version, digest_algs: sd.digest_algs, content_type: sd.content_type,
                                     content: Some(bytes.from_str("xx")), certs: sd.certs, crls: sd.crls, signers: sd.signers }
-            test.assert_eq_str(said(cmssigned.verify(other, 0, h(cert_ed()), None)), "cms: the signature, digest or tag did not verify")
+            test.assert_eq_str(said(cmssigned.verify(other, 0, h(cert_ed()), None)),
+                "cms: the signature, digest or tag did not verify")
             test.case("keys that do not fit")
             test.assert_eq_str(starts(said(cmssigned.verify(sd, 0, h(cert_ec()), None)), "cms: unusable key"), "yes")
-            test.assert_eq_str(said(cmssigned.verify(sd, 0, h(small_order_ed()), None)), "cms: unusable key: the public key is not an acceptable Ed25519 key")
+            test.assert_eq_str(said(cmssigned.verify(sd, 0, h(small_order_ed()), None)),
+                "cms: unusable key: the public key is not an acceptable Ed25519 key")
 
 fn starts(s: Str, prefix: Str) -> Str
     if str.starts_with(s, prefix)
@@ -429,7 +502,18 @@ fn small_order_ed() -> Str
 @test
 fn test_signing_with_certificates_that_cannot_name_a_key() [io]
     let msg = bytes.from_str("x")
-    let plain = CmsSignerSpec { cert: h(cert_plain()), scheme: 1, secret: h(ec_scalar()), by_ski: true, signing_time: 0 - 1, attributes: true }
-    test.assert_eq_str(said(cmssigned.sign(msg, false, [plain])), "cms: unusable key: the certificate has no subject key identifier")
-    let bad = CmsSignerSpec { cert: h(malformed_ski()), scheme: 1, secret: h(ec_scalar()), by_ski: true, signing_time: 0 - 1, attributes: true }
+    let plain = CmsSignerSpec { cert: h(cert_plain()),
+        scheme: 1,
+        secret: h(ec_scalar()),
+        by_ski: true,
+        signing_time: 0 - 1,
+        attributes: true }
+    test.assert_eq_str(said(cmssigned.sign(msg, false, [plain])),
+        "cms: unusable key: the certificate has no subject key identifier")
+    let bad = CmsSignerSpec { cert: h(malformed_ski()),
+        scheme: 1,
+        secret: h(ec_scalar()),
+        by_ski: true,
+        signing_time: 0 - 1,
+        attributes: true }
     test.assert_eq_str(starts(said(cmssigned.sign(msg, false, [bad])), "cms: unusable key"), "yes")

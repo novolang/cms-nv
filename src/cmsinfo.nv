@@ -106,8 +106,10 @@ pub fn digested_verify(d: CmsDigested, detached: ?Bytes) -> Result<Bytes, CmsErr
             body = bytes.clone(c)
         None    =>
             match detached
-                None    => return Err(CmsNoContent)
-                Some(x) => body = bytes.clone(x)
+                None    =>
+                    return Err(CmsNoContent)
+                Some(x) =>
+                    body = bytes.clone(x)
     let want = cmscrypto.digest_of(d.digest_alg, body)!
     if not digest_equal(want, d.digest)
         return Err(CmsAuthFailed)
@@ -174,7 +176,8 @@ pub fn eci_read(n: DerNode) -> Result<CmsEci, CmsError> []
     var icv = 0
     if enc_key_len(alg.oid) > 0
         match alg.params
-            None    => return Err(CmsMalformed("the content encryption parameters"))
+            None    =>
+                return Err(CmsMalformed("the content encryption parameters"))
             Some(p) =>
                 if is_gcm(alg.oid)
                     let pk = cmsder.children(p)!
@@ -208,13 +211,16 @@ pub fn eci_decrypt(e: CmsEci, cek: Bytes, detached: ?Bytes) -> Result<Bytes, Cms
             ct = bytes.clone(c)
         None    =>
             match detached
-                None    => return Err(CmsNoContent)
-                Some(x) => ct = bytes.clone(x)
+                None    =>
+                    return Err(CmsNoContent)
+                Some(x) =>
+                    ct = bytes.clone(x)
     cmscrypto.cbc_decrypt(cek, e.iv, ct)
 
 // An EncryptedContentInfo of content type data, AES-CBC, with the
 // ciphertext encapsulated unless `detach`.
-pub fn eci_write(alg: Str, cek: Bytes, iv: Bytes, plain: Bytes, detach: Bool) -> Result<Bytes, CmsError> []
+pub fn eci_write(alg: Str, cek: Bytes, iv: Bytes, plain: Bytes,
+                 detach: Bool) -> Result<Bytes, CmsError> []
     if enc_key_len(alg) == 0 or is_gcm(alg)
         return Err(CmsUnsupportedAlg(alg))
     if bytes.len(cek) != enc_key_len(alg)
@@ -242,10 +248,12 @@ pub fn encrypted_read(src: Bytes) -> Result<CmsEncrypted, CmsError> []
     Ok(CmsEncrypted { version: v, eci: eci })
 
 // Decrypt an EncryptedData under the key the caller holds.
-pub fn encrypted_decrypt(e: CmsEncrypted, key: Bytes, detached: ?Bytes) -> Result<Bytes, CmsError> []
+pub fn encrypted_decrypt(e: CmsEncrypted, key: Bytes,
+                         detached: ?Bytes) -> Result<Bytes, CmsError> []
     eci_decrypt(e.eci, key, detached)
 
 // A ContentInfo of type encrypted-data.
-pub fn encrypted_write(alg: Str, key: Bytes, iv: Bytes, plain: Bytes, detach: Bool) -> Result<Bytes, CmsError> []
+pub fn encrypted_write(alg: Str, key: Bytes, iv: Bytes, plain: Bytes,
+                       detach: Bool) -> Result<Bytes, CmsError> []
     let eci = eci_write(alg, key, iv, plain, detach)!
     write(OID_ENCRYPTED_DATA, cmsder.seq([cmsder.int_u(0), eci]))

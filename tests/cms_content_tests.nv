@@ -10,10 +10,8 @@
 
 use std.test
 use std.bytes
-use std.list
 use cmserr
 use cmsoid
-use cmsder
 use cmscrypto
 use cmsinfo
 
@@ -104,7 +102,7 @@ fn test_rfc4134_3_data_in_ber_and_der() [io]
         Err(e) => test.fail(e.message())
     test.case("a ContentInfo is read whole: the type and the content")
     match cmsinfo.read(h(rfc4134_3_1()))
-        Err(e) => test.fail(e.message())
+        Err(e)   => test.fail(e.message())
         Ok(info) =>
             test.assert_eq_str(info.content_type, OID_DATA)
             test.assert_eq(info.content == None, false)
@@ -124,7 +122,8 @@ fn test_rfc4134_6_digested_data() [io]
             test.case("a changed digest")
             let bad = CmsDigested { digest_alg: d.digest_alg, content_type: d.content_type, content: d.content,
                                     digest: h("406aec085279ba6e16022d9e0629c0229687dd49") }
-            test.assert_eq_str(said(cmsinfo.digested_verify(bad, None)), "cms: the signature, digest or tag did not verify")
+            test.assert_eq_str(said(cmsinfo.digested_verify(bad, None)),
+                "cms: the signature, digest or tag did not verify")
     test.case("writing the sample with SHA-1 gives the RFC's 96 octets")
     match cmsinfo.digested_write(OID_SHA1, sample(), false)
         Ok(b)  => test.assert_eq_str(hex(b), rfc4134_6())
@@ -139,8 +138,10 @@ fn test_digested_data_detached_and_openssl() [io]
                 Err(e) => test.fail(e.message())
                 Ok(d)  =>
                     test.assert_eq(d.content == None, true)
-                    test.assert_eq_str(said(cmsinfo.digested_verify(d, None)), "cms: the message has detached content and none was supplied")
-                    test.assert_eq_str(text_of(cmsinfo.digested_verify(d, Some(bytes.from_str("detach me")))), "detach me")
+                    test.assert_eq_str(said(cmsinfo.digested_verify(d, None)),
+                        "cms: the message has detached content and none was supplied")
+                    test.assert_eq_str(text_of(cmsinfo.digested_verify(d, Some(bytes.from_str("detach me")))),
+                        "detach me")
                     test.assert_eq_str(said(cmsinfo.digested_verify(d, Some(bytes.from_str("detach you")))),
                         "cms: the signature, digest or tag did not verify")
     test.case("OpenSSL: cms -digest_create -md sha256")
@@ -152,7 +153,8 @@ fn test_digested_data_detached_and_openssl() [io]
     match cmsinfo.digested_write(OID_SHA256, bytes.from_str("Hello, CMS world.\r\n"), false)
         Ok(b)  => test.assert_eq_str(hex(b), digested())
         Err(e) => test.fail(e.message())
-    test.assert_eq_str(said(cmsinfo.digested_write("1.2.3", sample(), false)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsinfo.digested_write("1.2.3", sample(), false)),
+        "cms: algorithm 1.2.3 is not implemented")
 
 @test
 fn test_encrypted_data() [io]
@@ -179,7 +181,11 @@ fn test_encrypted_data() [io]
             test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, h("ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"), None)),
                 "cms: the signature, digest or tag did not verify")
     test.case("detached ciphertext")
-    match cmsinfo.encrypted_write(OID_AES128_CBC, h("000102030405060708090a0b0c0d0e0f"), h("0f0e0d0c0b0a09080706050403020100"), sample(), true)
+    match cmsinfo.encrypted_write(OID_AES128_CBC,
+        h("000102030405060708090a0b0c0d0e0f"),
+        h("0f0e0d0c0b0a09080706050403020100"),
+        sample(),
+        true)
         Err(e) => test.fail(e.message())
         Ok(b)  =>
             match cmsinfo.encrypted_read(b)
@@ -188,24 +194,35 @@ fn test_encrypted_data() [io]
                     test.assert_eq(e.eci.encrypted == None, true)
                     test.assert_eq_str(said(cmsinfo.encrypted_decrypt(e, h("000102030405060708090a0b0c0d0e0f"), None)),
                         "cms: the message has detached content and none was supplied")
-    test.assert_eq_str(said(cmsinfo.encrypted_write("1.2.3", h("00"), h("00"), sample(), false)), "cms: algorithm 1.2.3 is not implemented")
-    test.assert_eq_str(said(cmsinfo.encrypted_write(OID_AES128_GCM, h("00"), h("00"), sample(), false)), "cms: algorithm 2.16.840.1.101.3.4.1.6 is not implemented")
+    test.assert_eq_str(said(cmsinfo.encrypted_write("1.2.3", h("00"), h("00"), sample(), false)),
+        "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsinfo.encrypted_write(OID_AES128_GCM, h("00"), h("00"), sample(), false)),
+        "cms: algorithm 2.16.840.1.101.3.4.1.6 is not implemented")
     test.assert_eq_str(said(cmsinfo.encrypted_write(OID_AES128_CBC, h("00"), h("00"), sample(), false)),
         "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.2 is 16 bytes")
 
 @test
 fn test_content_info_refusals() [io]
-    test.assert_eq_str(said(cmsinfo.data_read(h(digested()))), "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.1 was expected")
-    test.assert_eq_str(said(cmsinfo.data_read(h("0500"))), "cms: malformed structure: a ContentInfo is not the expected type")
+    test.assert_eq_str(said(cmsinfo.data_read(h(digested()))),
+        "cms: content type 1.2.840.113549.1.7.5 where 1.2.840.113549.1.7.1 was expected")
+    test.assert_eq_str(said(cmsinfo.data_read(h("0500"))),
+        "cms: malformed structure: a ContentInfo is not the expected type")
     test.assert_eq_str(said(cmsinfo.data_read(h("3000"))), "cms: malformed structure: the content type is missing")
     test.assert_eq_str(said(cmsinfo.data_read(h("30030401aa"))), "cms: malformed structure: an OBJECT IDENTIFIER")
-    test.assert_eq_str(said(cmsinfo.data_read(h("300b06092a864886f70d010701"))), "cms: the message has detached content and none was supplied")
-    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "0500"))), "cms: malformed structure: the content is under [0]")
-    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "a000"))), "cms: malformed structure: the content is missing")
-    test.assert_eq_str(said(cmsinfo.data_read(h("300f06092a864886f70d010701" + "a0020500"))), "cms: malformed structure: the data is not the expected type")
-    test.assert_eq_str(said(cmsinfo.data_read(h(rfc4134_3_2() + "00"))), "cms: malformed structure: bytes follow the value")
-    test.assert_eq_str(said(cmsinfo.data_read(h("30"))), "cms: malformed structure: asn1: the input ends at byte 1 with 1 more byte(s) needed")
-    test.assert_eq_str(said(cmsinfo.digested_read(h(rfc4134_3_2()))), "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.5 was expected")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300b06092a864886f70d010701"))),
+        "cms: the message has detached content and none was supplied")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "0500"))),
+        "cms: malformed structure: the content is under [0]")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300d06092a864886f70d010701" + "a000"))),
+        "cms: malformed structure: the content is missing")
+    test.assert_eq_str(said(cmsinfo.data_read(h("300f06092a864886f70d010701" + "a0020500"))),
+        "cms: malformed structure: the data is not the expected type")
+    test.assert_eq_str(said(cmsinfo.data_read(h(rfc4134_3_2() + "00"))),
+        "cms: malformed structure: bytes follow the value")
+    test.assert_eq_str(said(cmsinfo.data_read(h("30"))),
+        "cms: malformed structure: asn1: the input ends at byte 1 with 1 more byte(s) needed")
+    test.assert_eq_str(said(cmsinfo.digested_read(h(rfc4134_3_2()))),
+        "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.5 was expected")
 
 @test
 fn test_digests_and_cbc_primitives() [io]
@@ -223,7 +240,9 @@ fn test_digests_and_cbc_primitives() [io]
     test.assert_eq_str(said(cmscrypto.digest_of("1.2.3", h(""))), "cms: algorithm 1.2.3 is not implemented")
     test.case("padding of every length, and the refusals")
     for n in 0..34
-        match cmscrypto.cbc_encrypt(h("2b7e151628aed2a6abf7158809cf4f3c"), h("000102030405060708090a0b0c0d0e0f"), bytes.zeros(n))
+        match cmscrypto.cbc_encrypt(h("2b7e151628aed2a6abf7158809cf4f3c"),
+            h("000102030405060708090a0b0c0d0e0f"),
+            bytes.zeros(n))
             Err(e) => test.fail(e.message())
             Ok(ct) =>
                 test.assert_eq(bytes.len(ct), (n / 16 + 1) * 16)
@@ -262,11 +281,15 @@ fn test_rfc3394_key_wrap_vectors() [io]
     match cmscrypto.kw_unwrap(k256, h("28c9f404c4b810f4cbccb35cfb87f8263f5786e2d80ed326cbc7f0e71a99f43bfb988b9b7a02dd21"))
         Ok(p)  => test.assert_eq_str(hex(p), hex(d256))
         Err(e) => test.fail(e.message())
-    test.assert_eq_str(said(cmscrypto.kw_wrap(k128, h("0011223344556677"))), "cms: unusable key: the key to wrap is a multiple of 8 bytes and at least 16")
+    test.assert_eq_str(said(cmscrypto.kw_wrap(k128, h("0011223344556677"))),
+        "cms: unusable key: the key to wrap is a multiple of 8 bytes and at least 16")
     test.assert_eq_str(said(cmscrypto.kw_wrap(h("00"), d128)), "cms: unusable key: an AES key is 16, 24 or 32 bytes")
-    test.assert_eq_str(said(cmscrypto.kw_unwrap(h("00"), h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5"))), "cms: unusable key: an AES key is 16, 24 or 32 bytes")
-    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447"))), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe4"))), "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(h("00"), h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe5"))),
+        "cms: unusable key: an AES key is 16, 24 or 32 bytes")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447"))),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.kw_unwrap(k128, h("1fa68b0a8112b447aef34bd8fb5a7b829d3e862371d2cfe4"))),
+        "cms: the signature, digest or tag did not verify")
 
 @test
 fn test_rfc3211_key_wrap_round_trips() [io]
@@ -288,12 +311,18 @@ fn test_rfc3211_key_wrap_round_trips() [io]
                 match cmscrypto.pwri_unwrap(kek, iv, w)
                     Ok(p)  => test.assert_eq_str(hex(p), hex(cek))
                     Err(e) => test.fail(e.message())
-                test.assert_eq_str(said(cmscrypto.pwri_unwrap(h("0f0e0d0c0b0a09080706050403020100"), iv, w)), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, h("00"), bytes.zeros(16))), "cms: unusable key: the key to wrap is 4 to 255 bytes")
-    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, bytes.zeros(16), h("00"))), "cms: unusable key: the padding is 12 bytes")
-    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(16))), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(33))), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(32))), "cms: the signature, digest or tag did not verify")
+                test.assert_eq_str(said(cmscrypto.pwri_unwrap(h("0f0e0d0c0b0a09080706050403020100"), iv, w)),
+                    "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, h("00"), bytes.zeros(16))),
+        "cms: unusable key: the key to wrap is 4 to 255 bytes")
+    test.assert_eq_str(said(cmscrypto.pwri_wrap(kek, iv, bytes.zeros(16), h("00"))),
+        "cms: unusable key: the padding is 12 bytes")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(16))),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(33))),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmscrypto.pwri_unwrap(kek, iv, bytes.zeros(32))),
+        "cms: the signature, digest or tag did not verify")
 
 @test
 fn test_gcm_seal_and_open() [io]
@@ -303,9 +332,13 @@ fn test_gcm_seal_and_open() [io]
         Err(e) => test.fail(e.message())
         Ok(s)  =>
             test.assert_eq(bytes.len(s.tag), 16)
-            test.assert_eq_str(text_of(cmscrypto.gcm_open(key, nonce, h("aa"), s.ciphertext, s.tag)), "This is some sample content.")
-            test.assert_eq_str(said(cmscrypto.gcm_open(key, nonce, h("ab"), s.ciphertext, s.tag)), "cms: the signature, digest or tag did not verify")
+            test.assert_eq_str(text_of(cmscrypto.gcm_open(key, nonce, h("aa"), s.ciphertext, s.tag)),
+                "This is some sample content.")
+            test.assert_eq_str(said(cmscrypto.gcm_open(key, nonce, h("ab"), s.ciphertext, s.tag)),
+                "cms: the signature, digest or tag did not verify")
             test.assert_eq_str(said(cmscrypto.gcm_open(key, nonce, h("aa"), s.ciphertext, h("00"))),
                 "cms: not implemented: an AES-GCM tag of 1 bytes, only 16 is implemented")
-    test.assert_eq_str(said(cmscrypto.gcm_seal(key, h(""), h(""), h(""))), "cms: unusable key: the nonce is not empty")
-    test.assert_eq_str(said(cmscrypto.gcm_seal(h("00"), nonce, h(""), h(""))), "cms: unusable key: an AES key is 16, 24 or 32 bytes")
+    test.assert_eq_str(said(cmscrypto.gcm_seal(key, h(""), h(""), h(""))),
+        "cms: unusable key: the nonce is not empty")
+    test.assert_eq_str(said(cmscrypto.gcm_seal(h("00"), nonce, h(""), h(""))),
+        "cms: unusable key: an AES key is 16, 24 or 32 bytes")

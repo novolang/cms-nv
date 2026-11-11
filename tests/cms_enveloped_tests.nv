@@ -14,7 +14,6 @@ use std.bytes
 use std.list
 use cmserr
 use cmsoid
-use cmsder
 use cmsinfo
 use cmsenv
 
@@ -42,14 +41,23 @@ fn env_of(hexed: Str) -> CmsEnveloped
         Ok(e)  => e
         Err(e) =>
             test.fail(e.message())
-            CmsEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "", enc_alg: "", iv: bytes.zeros(0), icv_len: 0, encrypted: None } }
+            CmsEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "",
+                enc_alg: "",
+                iv: bytes.zeros(0),
+                icv_len: 0,
+                encrypted: None } }
 
 fn auth_of(hexed: Str) -> CmsAuthEnveloped
     match cmsenv.auth_read(h(hexed))
         Ok(e)  => e
         Err(e) =>
             test.fail(e.message())
-            CmsAuthEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "", enc_alg: "", iv: bytes.zeros(0), icv_len: 0, encrypted: None }, mac: bytes.zeros(0) }
+            CmsAuthEnveloped { version: 0, recipients: [], eci: CmsEci { content_type: "",
+                enc_alg: "",
+                iv: bytes.zeros(0),
+                icv_len: 0,
+                encrypted: None },
+            mac: bytes.zeros(0) }
 
 fn counter(n: Int, seed: Int) -> Bytes
     var b = bytes.zeros(n)
@@ -110,7 +118,8 @@ fn test_openssl_kek_recipient() [io]
     test.assert_eq(k.kind, 2)
     test.assert_eq_str(k.alg, OID_AES128_WRAP)
     test.assert_eq_str(bytes.to_str(k.key_id), "KKKK")
-    test.assert_eq_str(text_of(cmsenv.decrypt_with_kek(m, bytes.from_str("KKKK"), kek(), None)), "Hello, CMS world.\r\n")
+    test.assert_eq_str(text_of(cmsenv.decrypt_with_kek(m, bytes.from_str("KKKK"), kek(), None)),
+        "Hello, CMS world.\r\n")
     test.case("the unwrapped key opens it directly")
     match cmsenv.cek_from_kek(m.recipients, bytes.from_str("KKKK"), kek())
         Err(e)  => test.fail(e.message())
@@ -137,7 +146,8 @@ fn test_openssl_password_recipient() [io]
     test.assert_eq(p.kind, 3)
     test.assert_eq_str(p.alg, OID_PWRI_KEK)
     test.assert_eq_str(p.kdf, OID_PBKDF2)
-    test.assert_eq_str(text_of(cmsenv.decrypt_with_password(m, bytes.from_str("correct horse"), 100000, None)), "Hello, CMS world.\r\n")
+    test.assert_eq_str(text_of(cmsenv.decrypt_with_password(m, bytes.from_str("correct horse"), 100000, None)),
+        "Hello, CMS world.\r\n")
     test.case("a wrong password is the integrity check of the key wrap")
     test.assert_eq_str(said(cmsenv.decrypt_with_password(m, bytes.from_str("wrong horse"), 100000, None)),
         "cms: the signature, digest or tag did not verify")
@@ -166,8 +176,10 @@ fn test_password_and_kek_messages_written_here() [io]
                     Ok(m)  =>
                         test.assert_eq(m.version, 3)
                         test.assert_eq(list.len(m.recipients), 2)
-                        test.assert_eq_str(text_of(cmsenv.decrypt_with_kek(m, h("4b4b"), kek(), None)), "written by cms-nv")
-                        test.assert_eq_str(text_of(cmsenv.decrypt_with_password(m, bytes.from_str("pw"), 1000, None)), "written by cms-nv")
+                        test.assert_eq_str(text_of(cmsenv.decrypt_with_kek(m, h("4b4b"), kek(), None)),
+                            "written by cms-nv")
+                        test.assert_eq_str(text_of(cmsenv.decrypt_with_password(m, bytes.from_str("pw"), 1000, None)),
+                            "written by cms-nv")
     test.case("a KEK recipient alone is version 2; every wrap length")
     for len in [16, 24, 32]
         let key = counter(len, 4)
@@ -184,9 +196,11 @@ fn test_password_and_kek_messages_written_here() [io]
                                      prf: prf, wrap_alg: OID_AES256_CBC, iv: counter(16, 77), padding: counter(32, 3) }
         match cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [p2], false)
             Err(e) => test.fail(e.message())
-            Ok(b)  => test.assert_eq_str(text_of(cmsenv.decrypt_with_password(env_of(hex(b)), bytes.from_str("pw"), 1000, None)), "written by cms-nv")
+            Ok(b)  => test.assert_eq_str(text_of(cmsenv.decrypt_with_password(env_of(hex(b)), bytes.from_str("pw"), 1000, None)),
+                "written by cms-nv")
     test.case("the writer's refusals")
-    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [], false)), "cms: malformed structure: a message has at least one recipient")
+    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [], false)),
+        "cms: malformed structure: a message has at least one recipient")
     test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [CmsKekTarget { key_id: h("01"), kek: h("00") }], [], false)),
         "cms: unusable key: a KEK is 16, 24 or 32 bytes")
     let bad_wrap = CmsPasswordTarget { password: bytes.from_str("pw"), salt: counter(8, 5), iterations: 1000, prf: OID_HMAC_SHA256,
@@ -195,13 +209,16 @@ fn test_password_and_kek_messages_written_here() [io]
         "cms: algorithm 2.16.840.1.101.3.4.1.6 is not implemented")
     let bad_prf = CmsPasswordTarget { password: bytes.from_str("pw"), salt: counter(8, 5), iterations: 1000, prf: "1.2.3",
                                       wrap_alg: OID_AES128_CBC, iv: counter(16, 77), padding: counter(32, 3) }
-    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [bad_prf], false)), "cms: algorithm 1.2.3 is not implemented")
+    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [bad_prf], false)),
+        "cms: algorithm 1.2.3 is not implemented")
     let zero_iter = CmsPasswordTarget { password: bytes.from_str("pw"), salt: counter(8, 5), iterations: 0, prf: OID_HMAC_SHA256,
                                         wrap_alg: OID_AES128_CBC, iv: counter(16, 77), padding: counter(32, 3) }
-    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [zero_iter], false)), "cms: unusable key: pbkdf2: 0 is not a positive count")
+    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [zero_iter], false)),
+        "cms: unusable key: pbkdf2: 0 is not a positive count")
     let no_salt = CmsPasswordTarget { password: bytes.from_str("pw"), salt: bytes.zeros(0), iterations: 1000, prf: OID_HMAC_SHA256,
                                       wrap_alg: OID_AES128_CBC, iv: counter(16, 77), padding: counter(32, 3) }
-    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [no_salt], false)), "cms: unusable key: the salt is at least 8 bytes")
+    test.assert_eq_str(said(cmsenv.enveloped_write(OID_AES128_CBC, cek, iv, plain, [], [no_salt], false)),
+        "cms: unusable key: the salt is at least 8 bytes")
 
 @test
 fn test_openssl_auth_enveloped_data() [io]
@@ -211,16 +228,24 @@ fn test_openssl_auth_enveloped_data() [io]
     test.assert_eq(a.eci.icv_len, 16)
     test.assert_eq(bytes.len(a.eci.iv), 12)
     test.assert_eq(bytes.len(a.mac), 16)
-    test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_kek(a, bytes.from_str("KK"), kek(), None)), "Hello, CMS world.\r\n")
+    test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_kek(a, bytes.from_str("KK"), kek(), None)),
+        "Hello, CMS world.\r\n")
     test.case("a changed tag or ciphertext is refused before any plaintext")
-    let bad_tag = CmsAuthEnveloped { version: 0, recipients: a.recipients, eci: a.eci, mac: h("00000000000000000000000000000000") }
-    test.assert_eq_str(said(cmsenv.auth_decrypt_with_kek(bad_tag, bytes.from_str("KK"), kek(), None)), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(bad_tag, counter(16, 1), None)), "cms: the signature, digest or tag did not verify")
-    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(a, counter(15, 1), None)), "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.6 is 16 bytes")
+    let bad_tag = CmsAuthEnveloped { version: 0,
+        recipients: a.recipients,
+        eci: a.eci,
+        mac: h("00000000000000000000000000000000") }
+    test.assert_eq_str(said(cmsenv.auth_decrypt_with_kek(bad_tag, bytes.from_str("KK"), kek(), None)),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(bad_tag, counter(16, 1), None)),
+        "cms: the signature, digest or tag did not verify")
+    test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(a, counter(15, 1), None)),
+        "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.6 is 16 bytes")
     let short_mac = CmsAuthEnveloped { version: 0, recipients: a.recipients, eci: a.eci, mac: h("0011") }
     test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(short_mac, counter(16, 1), None)),
         "cms: malformed structure: the MAC is 2 bytes and the parameters say 16")
-    test.assert_eq_str(said(cmsenv.auth_decrypt_with_kek(a, bytes.from_str("KK"), kek(), Some(h("00")))), "cms: content was supplied for a message that carries its own")
+    test.assert_eq_str(said(cmsenv.auth_decrypt_with_kek(a, bytes.from_str("KK"), kek(), Some(h("00")))),
+        "cms: content was supplied for a message that carries its own")
     test.assert_eq_str(said(cmsenv.auth_decrypt_with_password(a, bytes.from_str("pw"), 100, None)),
         "cms: not implemented: KeyTransRecipientInfo: rsa-nv has no RSA decryption, and no PasswordRecipientInfo matched")
     test.case("an EnvelopedData reader refuses the AuthEnvelopedData and the other way round")
@@ -241,7 +266,8 @@ fn test_auth_enveloped_data_written_here() [io]
             Ok(b)  =>
                 let a = auth_of(hex(b))
                 test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_kek(a, h("4b"), kek(), None)), "sealed")
-                test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_password(a, bytes.from_str("pw"), 1000, None)), "sealed")
+                test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_password(a, bytes.from_str("pw"), 1000, None)),
+                    "sealed")
                 test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_cek(a, key, None)), "sealed")
     test.case("detached ciphertext")
     let key = counter(16, 7)
@@ -250,9 +276,10 @@ fn test_auth_enveloped_data_written_here() [io]
         Ok(b)  =>
             let a = auth_of(hex(b))
             test.assert_eq(a.eci.encrypted == None, true)
-            test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(a, key, None)), "cms: the message has detached content and none was supplied")
+            test.assert_eq_str(said(cmsenv.auth_decrypt_with_cek(a, key, None)),
+                "cms: the message has detached content and none was supplied")
             match cmsenv.auth_write(OID_AES128_GCM, key, counter(12, 1), bytes.from_str("sealed"), [kt], [], false)
-                Err(e) => test.fail(e.message())
+                Err(e)   => test.fail(e.message())
                 Ok(full) =>
                     match cmsenv.auth_read(full)
                         Err(e) => test.fail(e.message())
@@ -260,8 +287,11 @@ fn test_auth_enveloped_data_written_here() [io]
                             match fa.eci.encrypted
                                 None     => test.fail("no ciphertext")
                                 Some(ct) => test.assert_eq_str(text_of(cmsenv.auth_decrypt_with_cek(a, key, Some(ct))), "sealed")
-    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_CBC, key, counter(12, 1), bytes.from_str("x"), [kt], [], false)), "cms: algorithm 2.16.840.1.101.3.4.1.2 is not implemented")
+    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_CBC, key, counter(12, 1), bytes.from_str("x"), [kt], [], false)),
+        "cms: algorithm 2.16.840.1.101.3.4.1.2 is not implemented")
     test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_GCM, counter(5, 1), counter(12, 1), bytes.from_str("x"), [kt], [], false)),
         "cms: unusable key: the content key of 2.16.840.1.101.3.4.1.6 is 16 bytes")
-    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_GCM, key, counter(12, 1), bytes.from_str("x"), [], [], false)), "cms: malformed structure: a message has at least one recipient")
-    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_GCM, key, bytes.zeros(0), bytes.from_str("x"), [kt], [], false)), "cms: unusable key: the nonce is not empty")
+    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_GCM, key, counter(12, 1), bytes.from_str("x"), [], [], false)),
+        "cms: malformed structure: a message has at least one recipient")
+    test.assert_eq_str(said(cmsenv.auth_write(OID_AES128_GCM, key, bytes.zeros(0), bytes.from_str("x"), [kt], [], false)),
+        "cms: unusable key: the nonce is not empty")
