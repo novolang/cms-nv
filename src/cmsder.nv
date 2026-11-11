@@ -61,15 +61,15 @@ pub fn node_at(src: Bytes, off: Int) -> Result<DerNode, CmsError> []
         Err(e) => Err(malformed(e))
         Ok(h)  =>
             match asn1read.value_span_at(src, off, limits)
-                Err(e) => Err(malformed(e))
+                Err(e)    => Err(malformed(e))
                 Ok(whole) =>
-                    match asn1read.content_span_at(src, off, limits)
-                        Err(e) => Err(malformed(e))
-                        Ok(c)  =>
-                            Ok(DerNode { src: src, off: off, len: whole.len,
-                                         cls: class_number(h.tag.class), num: h.tag.number,
-                                         cons: h.tag.constructed, cstart: c.off, clen: c.len,
-                                         indef: h.indefinite })
+                    var eoc = 0
+                    if h.indefinite
+                        eoc = 2
+                    Ok(DerNode { src: src, off: off, len: whole.len,
+                                 cls: class_number(h.tag.class), num: h.tag.number,
+                                 cons: h.tag.constructed, cstart: off + h.header_len,
+                                 clen: whole.len - h.header_len - eoc, indef: h.indefinite })
 
 // The one value a document holds.  Bytes after it are refused.
 pub fn root(src: Bytes) -> Result<DerNode, CmsError> []

@@ -360,6 +360,7 @@ fn pwri_write(t: CmsPasswordTarget, cek: Bytes) -> Result<Bytes, CmsError>
         Err(e) => Err(CmsBadKey(e.message()))
         Ok(params) =>
             match pbkdf2kdf.derive(params, t.password, t.salt)
+                // cov: skip — `derive` refuses only parameters, which `allowing_below_floor` has accepted
                 Err(e) => Err(CmsBadKey(e.message()))
                 Ok(kek) =>
                     let wrapped = cmscrypto.pwri_wrap(kek, t.iv, cek, t.padding)!
