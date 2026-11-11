@@ -1,0 +1,126 @@
+// cms_api_tests.nv — the smaller public functions the other suites reach
+// only through a larger one: the DER helpers, the EncryptedContentInfo and
+// the CBC primitives, each called by name.
+
+use std.test
+use std.bytes
+use std.list
+use cmserr
+use cmsoid
+use cmsder
+use cmscrypto
+use cmsinfo
+use cmsenv
+
+fn said<T>(r: Result<T, CmsError>) -> Str
+    match r
+        Ok(_)  => "ok"
+        Err(e) => e.message()
+
+fn h(s: Str) -> Bytes
+    bytes.from_hex(s) ?? bytes.zeros(0)
+
+fn hex(b: Bytes) -> Str
+    bytes.to_hex(b)
+
+fn must(r: Result<Bytes, CmsError>) -> Bytes
+    match r
+        Ok(b)  => bytes.clone(b)
+        Err(e) =>
+            test.fail(e.message())
+            bytes.zeros(0)
+
+@test
+fn test_der_values_are_read_and_written() [io]
+    // SEQUENCE { INTEGER 7, [1] IMPLICIT OCTET STRING 'ab', SET { NULL } }
+    let doc = h("3009" + "020107" + "810261" + "62" + "3100")
+    match cmsder.root(doc)
+        Err(e) => test.fail(e.message())
+        Ok(top) =>
+            test.assert_eq_str(hex(cmsder.raw(top)), hex(doc))
+            test.assert_eq(cmsder.is_universal(top, 16), true)
+            test.assert_eq(cmsder.is_universal(top, 17), false)
+            test.assert_eq_str(said(cmsder.expect(top, 16, "the document")), "ok")
+            test.assert_eq_str(said(cmsder.expect(top, 17, "the document")), "cms: malformed structure: the document is not the expected type")
+            match cmsder.children(top)
+                Err(e) => test.fail(e.message())
+                Ok(kids) =>
+                    test.assert_eq(cmsder.is_context(kids[1], 1), true)
+                    test.assert_eq(cmsder.is_context(kids[1], 2), false)
+                    test.assert_eq(cmsder.is_context(kids[0], 1), false)
+                    test.assert_eq_str(said(cmsder.member(kids, 2, "the set")), "ok")
+                    test.assert_eq_str(said(cmsder.member(kids, 3, "the fourth")), "cms: malformed structure: the fourth is missing")
+    test.case("an AlgorithmIdentifier with and without parameters")
+    match cmsder.root(h(hex(must(cmsder.alg_id(OID_SHA256, Some(cmsder.null_value()))))))
+        Err(e)  => test.fail(e.message())
+        Ok(alg) =>
+            match cmsder.alg_of(alg)
+                Err(e) => test.fail(e.message())
+                Ok(a)  =>
+                    test.assert_eq_str(a.oid, OID_SHA256)
+                    test.assert_eq(a.params == None, false)
+    match cmsder.root(must(cmsder.alg_id(OID_SHA1, None)))
+        Err(e)  => test.fail(e.message())
+        Ok(alg) =>
+            match cmsder.alg_of(alg)
+                Err(e) => test.fail(e.message())
+                Ok(a)  => test.assert_eq(a.params == None, true)
+    test.case("a SET OF is written in the order of its members' encodings")
+    test.assert_eq_str(hex(cmsder.set_of([h("0201ff"), h("020105"), h("0400")])), "31080201050201ff0400")
+    test.assert_eq_str(hex(cmsder.ctx_prim(1, h("6162"))), "81026162")
+    test.assert_eq_str(hex(must(cmsder.oid("1.2.840.113549.1.7.1"))), "06092a864886f70d010701")
+    test.assert_eq_str(hex(must(cmsder.oid_content("1.2.840.113549.1.7.1"))), "2a864886f70d010701")
+    test.assert_eq_str(hex(cmsder.null_value()), "0500")
+
+@test
+fn test_encrypted_content_info_and_cbc_by_name() [io]
+    let key = h("000102030405060708090a0b0c0d0e0f")
+    let iv = h("0f0e0d0c0b0a09080706050403020100")
+    match cmsinfo.eci_write(OID_AES128_CBC, key, iv, bytes.from_str("by name"), false)
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            match cmsder.root(b)
+                Err(e)   => test.fail(e.message())
+                Ok(node) =>
+                    match cmsinfo.eci_read(node)
+                        Err(e)  => test.fail(e.message())
+                        Ok(eci) =>
+                            test.assert_eq_str(eci.content_type, OID_DATA)
+                            test.assert_eq_str(hex(eci.iv), hex(iv))
+                            test.assert_eq(cmsinfo.is_gcm(eci.enc_alg), false)
+                            match cmsinfo.eci_decrypt(eci, key, None)
+                                Ok(p)  => test.assert_eq_str(bytes.to_str(p), "by name")
+                                Err(e) => test.fail(e.message())
+    test.assert_eq(cmsinfo.is_gcm(OID_AES256_GCM), true)
+    test.assert_eq_str(said(cmsinfo.eci_write(OID_AES128_CBC, key, iv, bytes.from_str("x"), true)), "ok")
+    test.case("content_of answers the content or the refusal")
+    match cmsinfo.read(must(cmsinfo.data_write(bytes.from_str("x"))))
+        Err(e)   => test.fail(e.message())
+        Ok(info) =>
+            test.assert_eq_str(said(cmsinfo.content_of(info, OID_DATA)), "ok")
+            test.assert_eq_str(said(cmsinfo.content_of(info, OID_SIGNED_DATA)), "cms: content type 1.2.840.113549.1.7.1 where 1.2.840.113549.1.7.2 was expected")
+    test.case("raw CBC and the padding")
+    test.assert_eq(bytes.len(cmscrypto.pad(h("0102"))), 16)
+    match cmscrypto.cbc_encrypt_raw(key, iv, bytes.zeros(32))
+        Err(e) => test.fail(e.message())
+        Ok(ct) =>
+            match cmscrypto.cbc_decrypt_raw(key, iv, ct)
+                Ok(p)  => test.assert_eq_str(hex(p), hex(bytes.zeros(32)))
+                Err(e) => test.fail(e.message())
+
+@test
+fn test_the_password_key_by_name() [io]
+    let cek = h("000102030405060708090a0b0c0d0e0f")
+    let target = CmsPasswordTarget { password: bytes.from_str("pw"), salt: h("0001020304050607"), iterations: 1000, prf: OID_HMAC_SHA256,
+                                     wrap_alg: OID_AES128_CBC, iv: h("000102030405060708090a0b0c0d0e0f"), padding: bytes.zeros(32) }
+    match cmsenv.enveloped_write(OID_AES128_CBC, cek, h("0f0e0d0c0b0a09080706050403020100"), bytes.from_str("x"), [], [target], false)
+        Err(e) => test.fail(e.message())
+        Ok(b)  =>
+            match cmsenv.enveloped_read(b)
+                Err(e) => test.fail(e.message())
+                Ok(m)  =>
+                    match cmsenv.cek_from_password(m.recipients, bytes.from_str("pw"), 1000)
+                        Ok(k)  => test.assert_eq_str(hex(k), hex(cek))
+                        Err(e) => test.fail(e.message())
+                    test.assert_eq_str(said(cmsenv.cek_from_password(m.recipients, bytes.from_str("pw"), 999)),
+                        "cms: unusable key: the iteration count is 1000, the limit is 999")

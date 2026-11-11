@@ -152,6 +152,7 @@ pub struct DerAlg
     oid: Str
     params: ?DerNode
 
+// The algorithm and parameters of an AlgorithmIdentifier SEQUENCE.
 pub fn alg_of(n: DerNode) -> Result<DerAlg, CmsError> []
     let kids = children(n)!
     let o = oid_text(member(kids, 0, "the algorithm")!)!
